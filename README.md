@@ -45,11 +45,11 @@ $ python get-pip.py
 ### PostgreSQL
 #### Install using brew
 ```bash
-$ brew install postgresql@14
+$ brew install postgresql@16
 ```
 #### Start service
 ```bash
-$ brew services start postgresql@14
+$ brew services start postgresql@16
 ```
 
 ## Install, Create and Activate Virtual Environment
