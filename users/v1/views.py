@@ -1,29 +1,32 @@
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
-from django.contrib.auth import authenticate
+# from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework import generics, status
-from rest_framework.permissions import AllowAny
-from django.contrib.auth.models import User
-from django.contrib.auth import get_user_model
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import authenticate
+from rest_framework.permissions import AllowAny
+from rest_framework.authtoken.models import Token
 from users.serializers import  UserSerializer, RegisterUserSerializer, LoginUserSerializer
+from users.models import User
 
 # from users.v1.utils import get_google_user_info
 # user_model = get_user_model()
 
 class RegisterUserView(generics.CreateAPIView):
     queryset = User.objects.all()
-    permission_classes = (AllowAny,)
+    permission_classes = [AllowAny]
     serializer_class = RegisterUserSerializer
 
 
 @method_decorator(csrf_exempt, name='dispatch')
 class LoginUserView(APIView):
     serializer_class = LoginUserSerializer
+    permission_classes = [AllowAny]
 
-    def post(self, request, *args, **kwargs):
+    def post(self, request: Request, *args, **kwargs):
         email = request.data.get('email')
         password = request.data.get('password')
         user = authenticate(username=email, password=password)  # Use `username` for Django's default User model
@@ -61,8 +64,9 @@ class LoginUserView(APIView):
 
 
 class HelloWorldView(APIView):
+    permission_classes = [AllowAny]
 
-    def get(self, request):
+    def get(self, request: Request):
         return Response("Hello World")
 
 
