@@ -8,17 +8,32 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.contrib.auth import authenticate
 from rest_framework.permissions import AllowAny
-from rest_framework.authtoken.models import Token
+from rest_framework.permissions import IsAuthenticated
+from yaml import serialize
+
 from users.serializers import  UserSerializer, RegisterUserSerializer, LoginUserSerializer
 from users.models import User
 
 # from users.v1.utils import get_google_user_info
 # user_model = get_user_model()
 
-class RegisterUserView(generics.CreateAPIView):
-    queryset = User.objects.all()
-    permission_classes = [AllowAny]
+class RegisterUserView(generics.GenericAPIView):
     serializer_class = RegisterUserSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request: Request):
+        data = request.data
+        serializer = self.serializer_class(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            response = {
+                'message': 'User created successfully.',
+                'data': serializer.data
+            }
+            return Response(data=response, status=status.HTTP_201_CREATED)
+
+        return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -29,9 +44,10 @@ class LoginUserView(APIView):
     def post(self, request: Request, *args, **kwargs):
         email = request.data.get('email')
         password = request.data.get('password')
-        user = authenticate(username=email, password=password)  # Use `username` for Django's default User model
+        user = authenticate(request, email=email, password=password)
+
         if not user:
-            return Response({'detail': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({"error": "Invalid email or password."}, status=status.HTTP_401_UNAUTHORIZED)
 
         refresh = RefreshToken.for_user(user)
         user_serializer = UserSerializer(user)
@@ -41,6 +57,12 @@ class LoginUserView(APIView):
             'user': user_serializer.data
         }, status=status.HTTP_200_OK)
 
+    def get(self, request: Request):
+        content = {
+            'user': str(request.user),
+            'auth': str(request.auth),
+        }
+        return Response(data=content, status=status.HTTP_200_OK)
 
 
 """  
