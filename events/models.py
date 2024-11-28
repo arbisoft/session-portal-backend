@@ -24,7 +24,7 @@ class Event(models.Model):
         ARCHIVED = "ARCHIVED", _("Archived")
 
 
-    creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='events')
+    creator = models.ForeignKey(User, on_delete=models.DO_NOTHING, related_name='events')
     title = models.CharField(max_length=255)
     description = models.TextField()
     event_time = models.DateTimeField()
@@ -47,7 +47,7 @@ class VideoAsset(models.Model):
         FAILED = "FAILED", _("Failed")
 
 
-    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name='videos')
+    event = models.ForeignKey(Event, on_delete=models.DO_NOTHING, related_name='videos')
     title = models.CharField(max_length=255)
     cdn_url = models.URLField()
     duration = models.IntegerField()  # in seconds

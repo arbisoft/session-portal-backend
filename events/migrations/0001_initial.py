@@ -27,7 +27,7 @@ class Migration(migrations.Migration):
                 ('is_featured', models.BooleanField(default=False)),
                 ('created', models.DateTimeField(auto_now_add=True)),
                 ('modified', models.DateTimeField(auto_now=True)),
-                ('creator', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='events', to=settings.AUTH_USER_MODEL)),
+                ('creator', models.ForeignKey(on_delete=django.db.models.deletion.DO_NOTHING, related_name='events', to=settings.AUTH_USER_MODEL)),
             ],
         ),
         migrations.CreateModel(
@@ -52,7 +52,7 @@ class Migration(migrations.Migration):
                 ('file_size', models.BigIntegerField()),
                 ('created', models.DateTimeField(auto_now_add=True)),
                 ('modified', models.DateTimeField(auto_now=True)),
-                ('event', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='videos', to='events.event')),
+                ('event', models.ForeignKey(on_delete=django.db.models.deletion.DO_NOTHING, related_name='videos', to='events.event')),
             ],
         ),
         migrations.AddField(
