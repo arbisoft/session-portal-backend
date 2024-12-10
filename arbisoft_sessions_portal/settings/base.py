@@ -139,6 +139,8 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+ALLOW_ONLY_INTERNAL_USERS = True
+
 try:
     from .local import *
 except Exception:
