@@ -1,15 +1,25 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from rest_framework import generics, status
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.exceptions import ValidationError
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.permissions import AllowAny
 
 from arbisoft_sessions_portal.services.google.google_user_info import GoogleUserInfoService
-from users.v1.serializers import LoginUserSerializer
 
+from users.v1.utils import get_google_user_info
 user_model = get_user_model()
 
+class RegisterUserView(generics.GenericAPIView):
+    pass
+
+
+class LoginUserView(APIView):
+    pass
+
+
+"""  
 class LoginUserView(APIView):
 
     permission_classes = []
@@ -38,9 +48,14 @@ class LoginUserView(APIView):
             'refresh': str(refresh),
             'access': str(refresh.access_token),
         })
+"""
 
 
 class HelloWorldView(APIView):
+    permission_classes = [AllowAny]
 
-    def get(self, request):
+    def get(self, request: Request):
         return Response("Hello World")
+
+
+
