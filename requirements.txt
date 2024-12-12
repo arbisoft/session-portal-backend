@@ -1,5 +1,7 @@
 asgiref==3.8.1
 attrs==24.2.0
+certifi==2024.8.30
+charset-normalizer==3.4.0
 Django==4.2.16
 django-filter==24.3
 djangorestframework==3.15.2
@@ -22,5 +24,12 @@ sqlparse==0.5.1
 swagger-spec-validator==3.0.4
 typing_extensions==4.12.2
 uritemplate==4.1.1
-wheel==0.44.0
+idna==3.10
+Markdown==3.7
 psycopg2-binary==2.9.10
+PyJWT==2.9.0
+requests==2.32.3
+setuptools==75.1.0
+sqlparse==0.5.1
+urllib3==2.2.3
+wheel==0.44.0
