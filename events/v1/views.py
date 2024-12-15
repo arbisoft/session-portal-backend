@@ -6,6 +6,9 @@ from .serializers import EventTypeSerializer
 
 class EventTypeListView(APIView):
     def get(self, request, *args, **kwargs):
-        event_type = Event.EventType.choices
-        serializer = EventTypeSerializer(event_type, many=True)
+        event_types = [
+            {"label": choice[0], "key": choice[1]}
+            for choice in Event.EventType.choices
+        ]
+        serializer = EventTypeSerializer(event_types, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
