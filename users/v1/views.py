@@ -37,6 +37,12 @@ class LoginUserView(APIView):
         return Response({
             'refresh': str(refresh),
             'access': str(refresh.access_token),
+            'user_info': {
+                'full_name': user_info.get('name'),
+                'first_name': user_info.get('given_name'),
+                'last_name': user_info.get('family_name'),
+                'avatar': user_info.get('picture')
+            }
         })
 
 
