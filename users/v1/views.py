@@ -30,7 +30,12 @@ class LoginUserView(APIView):
 
         user = user_model.objects.filter(email=user_info['email']).first()
         if not user:
-            user = user_model.objects.create_user(username=f"{user_info['email']}_{user_info['id']}", email=user_info['email'])
+            user = user_model.objects.create_user(
+                username=f"{user_info['email']}_{user_info['id']}", 
+                email=user_info['email'],
+                first_name=user_info['given_name'],
+                last_name=user_info['family_name']
+            )
         
         refresh = RefreshToken.for_user(user)
 
