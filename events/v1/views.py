@@ -3,10 +3,9 @@ from rest_framework.generics import ListAPIView
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
-from events.models import Event
+from events.models import Event, VideoAsset
 from events.v1.filters import EventFilter
-from events.v1.serializers import EventSerializer
+from events.v1.serializers import EventSerializer, VideoAssetSerializer
 
 
 class EventTypeListView(APIView):
@@ -27,3 +26,11 @@ class EventsListView(ListAPIView):
     serializer_class = EventSerializer
     pagination_class = PageNumberPagination
     filterset_class = EventFilter
+
+class VideoAssetListView(ListAPIView):
+    
+    serializer_class = VideoAssetSerializer
+    pagination_class = None
+    def get_queryset(self):
+        event_id = self.kwargs['event_id']
+        return VideoAsset.objects.select_related('event__creator').prefetch_related('event__tags').filter(event_id=event_id)
