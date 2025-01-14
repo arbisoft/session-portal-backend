@@ -28,6 +28,7 @@ class EventsListView(ListAPIView):
     pagination_class = PageNumberPagination
     filterset_class = EventFilter
 
+
 class VideoAssetDetailView(RetrieveAPIView):
     
     serializer_class = VideoAssetSerializer
@@ -38,3 +39,4 @@ class VideoAssetDetailView(RetrieveAPIView):
             event_id=self.kwargs["pk"]
             )
         return obj
+
