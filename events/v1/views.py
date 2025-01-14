@@ -1,7 +1,11 @@
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
+from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework import status
 from events.models import Event
+from events.v1.filters import EventFilter
+from events.v1.serializers import EventSerializer
 
 class EventTypeListView(APIView):
     def get(self, request, *args, **kwargs):
@@ -10,3 +14,10 @@ class EventTypeListView(APIView):
             for choice in Event.EventType.choices
         ]
         return Response(event_types, status=status.HTTP_200_OK)
+    
+class EventsListView(ListAPIView):
+
+    queryset = Event.objects.all()
+    serializer_class = EventSerializer
+    pagination_class = PageNumberPagination
+    filterset_class = EventFilter
