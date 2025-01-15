@@ -29,6 +29,7 @@ class EventsListView(ListAPIView):
     filterset_class = EventFilter
 
 
+
 class VideoAssetDetailView(RetrieveAPIView):
     
     serializer_class = VideoAssetSerializer
