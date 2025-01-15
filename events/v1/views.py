@@ -1,5 +1,5 @@
 from rest_framework import status
-from rest_framework.generics import ListAPIView
+from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -27,10 +27,9 @@ class EventsListView(ListAPIView):
     pagination_class = PageNumberPagination
     filterset_class = EventFilter
 
-class VideoAssetListView(ListAPIView):
+class VideoAssetDetailView(RetrieveAPIView):
     
     serializer_class = VideoAssetSerializer
-    pagination_class = None
     def get_queryset(self):
-        event_id = self.kwargs['event_id']
+        event_id = self.kwargs['pk']
         return VideoAsset.objects.select_related('event__creator').prefetch_related('event__tags').filter(event_id=event_id)
