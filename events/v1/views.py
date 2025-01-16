@@ -1,3 +1,4 @@
+from django.shortcuts import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView, RetrieveAPIView
@@ -25,6 +26,10 @@ class EventsListView(ListAPIView):
 class VideoAssetDetailView(RetrieveAPIView):
     
     serializer_class = VideoAssetSerializer
-    def get_queryset(self):
-        event_id = self.kwargs['pk']
-        return VideoAsset.objects.select_related('event__creator').prefetch_related('event__tags').filter(event_id=event_id)
+    
+    def get_object(self):
+        obj = get_object_or_404(
+            VideoAsset.objects.select_related('event__creator').prefetch_related('event__tags'), 
+            event_id=self.kwargs["pk"]
+            )
+        return obj
