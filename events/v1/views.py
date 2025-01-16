@@ -40,4 +40,3 @@ class VideoAssetDetailView(RetrieveAPIView):
             event_id=self.kwargs["pk"]
             )
         return obj
-
