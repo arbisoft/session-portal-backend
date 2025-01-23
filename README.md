@@ -36,7 +36,10 @@ DB_USER=<your postgres user>
 DB_PASSWORD=<your postgres password>
 DB_HOST=<your postgres host >
 DB_PORT=5432
+
 DJANGO_PORT=<django server port>
+DJANGO_SECRET_KEY=<django secret key>
+DJANGO_DEBUG=<django debug flag>
 ```
 
 ## Code setup
