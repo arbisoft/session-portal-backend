@@ -29,7 +29,7 @@ Setup Guide to setup project from scratch.
     + [Build and Start Containers](#build-and-start-docker-containers)
 
 ## Set up Environment Variables
-Create `.env` file at the root of the project from the following:
+Create `.env` file at the root of the project from the following and set the variables:
 ```bash
 DB_NAME=asp
 DB_USER=<your postgres user>
@@ -74,8 +74,8 @@ $ brew install postgresql@16
 $ brew services start postgresql@16
 ```
 
-## Install, Create and Activate Virtual Environment
-### Install pyenv-virtualenv:
+### Install, Create and Activate Virtual Environment
+#### Install pyenv-virtualenv:
 Install pyenv-virtualenv with homebrew and add its init to your .zshrc
 ```bash
 $ brew install pyenv-virtualenv
@@ -99,19 +99,19 @@ At project root run the following command to install dependencies:
 ```bash
 $ pip install -r requirements.txt
 ```
-## Database setup
+### Database setup
 Create a new database using command
 ```bash
 $ createdb asp
 ```
 
-## Migrate
+### Migrate
 Apply the migrations
 ```bash
 $ python manage.py migrate
 ```
 
-## Run server
+### Run server
 Run the server
 ```bash
 $ python manage.py runserver
@@ -119,7 +119,7 @@ $ python manage.py runserver
 
 ## Option 2: Set Up Using Docker
 
-#### Prerequisites
+### Prerequisites
 Before you begin, ensure that you have the following installed:
 
 - Docker: https://docs.docker.com/engine/install/ubuntu/
