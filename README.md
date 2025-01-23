@@ -6,25 +6,47 @@ Setup Guide to setup project from scratch.
 - Covered OS:
     * macOs
 - Table of Contents
-   * [Environment Setup](#environment-setup)
-      + [Python 3.12](#python-312)
-         - [Install pyenv](#install-pyenv)
-         - [Install Python 3.12](#install-python-312)
-      + [PIP](#pip)
-      + [PostgreSQL](#postgresql)
-         - [Install using brew](#install-using-brew)
-         - [Start service](#start-service)
-   * [Install, Create and Activate Virtual Environment](#install-create-and-activate-virtual-environment)
-      + [Install pyenv-virtualenv:](#install-pyenv-virtualenv)
-      + [Install dependencies:](#install-dependencies)
-   * [Database setup](#database-setup)
-   * [Code setup](#code-setup)
-      + [Create local.py file](#create-localpy-file)
-      + [Modify database settings for local db](#modify-database-settings-for-local-db)
-   * [Migrate](#migrate)
-   * [Run server](#run-server)
+  * [Create file for environment variables](#set-up-environment-variables)
+  * [Code Setup](#code-setup)
+  * [Option 1: Setup using Virtual Environment](#option-1-setup-using-virtual-environment)
+    + [Python 3.12](#python-312)
+      - [Install pyenv](#install-pyenv)
+      - [Install Python 3.12](#install-python-312)
+    + [PIP](#pip)
+    + [PostgreSQL](#postgresql)
+      - [Install using brew](#install-using-brew)
+      - [Start service](#start-service)
+    + [Install, Create and Activate Virtual Environment](#install-create-and-activate-virtual-environment)
+    + [Install pyenv-virtualenv:](#install-pyenv-virtualenv)
+    + [Install dependencies:](#install-dependencies)
+    + [Database setup](#database-setup)
+    + [Create local.py file](#create-localpy-file)
+    + [Modify database settings for local db](#modify-database-settings-for-local-db)
+    + [Migrate](#migrate)
+    + [Run server](#run-server)
+  * [Option 2: Set up using Docker](#option-2-set-up-using-docker)
+    + [Install Prerequisites](#prerequisites)
+    + [Build and Start Containers](#build-and-start-docker-containers)
 
-## Environment Setup
+## Set up Environment Variables
+Create `.env` file at the root of the project from the following:
+```bash
+DB_NAME=asp
+DB_USER=<your postgres user>
+DB_PASSWORD=<your postgres password>
+DB_HOST=<your postgres host >
+DB_PORT=5432
+DJANGO_PORT=<django server port>
+```
+
+## Code setup
+### Create local.py file
+On root of your project run the command
+```bash
+$ cp arbisoft_sessions_portal/settings/local.example.py arbisoft_sessions_portal/settings/local.py
+```
+
+## Option 1: Setup Using Virtual Environment
 ### Python 3.12
 #### Install pyenv
 ```bash
@@ -82,30 +104,7 @@ Create a new database using command
 ```bash
 $ createdb asp
 ```
-## Code setup
-### Create local.py file
-On root of your project run the command
-```bash
-$ cp arbisoft_sessions_portal/settings/local.example.py arbisoft_sessions_portal/settings/local.py
-```
-### Modify database settings for local db
-Open the `local.py` using an editor
-```bash
-$ nano arbisoft_sessions_portal/settings/local.py
-```
-Update the settings in the file for the database, The username is usually the username of your macOs account for example a user with arbisoft as username will set settings as
-```python
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        'NAME': 'asp',
-        'USER': 'arbisoft',
-        'PASSWORD': '',
-        'HOST': 'localhost',
-        'PORT': '5432',
-    }
-}
-```
+
 ## Migrate
 Apply the migrations
 ```bash
@@ -118,5 +117,20 @@ Run the server
 $ python manage.py runserver
 ```
 
+## Option 2: Set Up Using Docker
+
+#### Prerequisites
+Before you begin, ensure that you have the following installed:
+
+- Docker: https://docs.docker.com/engine/install/ubuntu/
+- docker-compose: https://docs.docker.com/compose/install/
 
 
+### Build and Start Docker Containers
+This command will rebuild and start all the services using the configuration defined in docker-compose.yaml
+
+```
+docker-compose up --build 
+```
+
+Once the containers are up, check the API connection by visiting http://localhost:${DJANGO_PORT} to ensure the Django app is running properly.
