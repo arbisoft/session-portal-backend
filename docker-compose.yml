@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16
+    container_name: asp-db
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - asp-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: on-failure
+    healthcheck:
+      test: pg_isready -U ${DB_USER} -d ${DB_NAME}
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - asp-network
+
+  django:
+    build: .
+    container_name: asp-django
+    entrypoint: /entrypoint.sh
+    command: bash -c "python manage.py runserver 0.0.0.0:${DJANGO_PORT}"
+    volumes:
+      - .:/app
+    ports:
+      - "${DJANGO_PORT}:${DJANGO_PORT}"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - asp-network
+
+volumes:
+  asp-data:
+
+networks:
+  asp-network:
+    driver: bridge
