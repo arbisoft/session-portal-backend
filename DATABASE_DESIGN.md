@@ -44,9 +44,9 @@ erDiagram
         int event_id FK
         string title
         string s3_key
-        string cdn_url
+        string video_file
         integer duration
-        string thumbnail_url
+        string thumbnail
         string status
         integer file_size
         string content_type
