@@ -168,3 +168,5 @@ cython_debug/
 # ignore all the private files in the project
 **/private.**
 local.py
+
+media/
