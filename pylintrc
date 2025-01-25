@@ -13,6 +13,13 @@ disable=
     missing-module-docstring,
     abstract-method,
 
+[FORMAT]
+max-line-length = 120
+ignore-long-lines = ^\s*(# )?((<?https?://\S+>?)|(\.\. \w+: .*))$
+single-line-if-stmt = no
+max-module-lines = 1000
+indent-string = '    '
+
 [MISCELLANEOUS]
 notes = FIXME,XXX,TODO
 
