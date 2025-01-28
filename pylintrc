@@ -4,11 +4,8 @@ load-plugins = pylint_django
 
 [MESSAGES CONTROL]
 disable=
-    invalid-name,
     django-not-configured,
-    consider-using-with,
     bad-option-value,
-    too-many-positional-arguments,
     logging-format-interpolation,
     missing-module-docstring,
     abstract-method,
