@@ -1,28 +1,32 @@
-from django.db import models
 from django.contrib.auth import get_user_model
+from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 User = get_user_model()
 
+
 class Tag(models.Model):
+    """ Model to store tags for events """
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField()
     created = models.DateTimeField(auto_now_add=True)
     modified = models.DateTimeField(auto_now=True)
 
-
     def __str__(self):
         return self.name
 
+
 class Event(models.Model):
+    """ Model to store events """
     class EventType(models.TextChoices):
+        """ Enum for event types """
         SESSION = "SESSION", _("Session")
 
     class EventStatus(models.TextChoices):
+        """ Enum for event status """
         DRAFT = "DRAFT", _("Draft")
         PUBLISHED = "PUBLISHED", _("Published")
         ARCHIVED = "ARCHIVED", _("Archived")
-
 
     creator = models.ForeignKey(User, on_delete=models.DO_NOTHING, related_name='events')
     title = models.CharField(max_length=255)
@@ -41,11 +45,12 @@ class Event(models.Model):
 
 
 class VideoAsset(models.Model):
+    """ Model to store video assets """
     class VideoStatus(models.TextChoices):
+        """ Enum for video status """
         PROCESSING = "PROCESSING", _("Processing")
         READY = "READY", _("Ready")
         FAILED = "FAILED", _("Failed")
-
 
     event = models.ForeignKey(Event, on_delete=models.DO_NOTHING, related_name='videos')
     title = models.CharField(max_length=255)

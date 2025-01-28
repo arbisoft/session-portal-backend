@@ -100,7 +100,7 @@ $ pyenv activate venv-3.12.6
 ### Install dependencies:
 At project root run the following command to install dependencies:
 ```bash
-$ pip install -r requirements.txt
+$ pip install -r requirements/base.txt
 ```
 ### Database setup
 Create a new database using command

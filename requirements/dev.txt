@@ -1,0 +1,5 @@
+tox==4.24.1
+pylint==3.3.3
+pycodestyle==2.12.1
+isort==5.13.2
+pylint_django==2.6.1

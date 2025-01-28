@@ -1,10 +1,14 @@
 from rest_framework import serializers
-from events.models import Event
+
 from django.contrib.auth import get_user_model
+
+from events.models import Event
 
 user_model = get_user_model()
 
+
 class PublisherSerializer(serializers.ModelSerializer):
+    """ Serializer for the publisher field in the Event model """
 
     class Meta:
         model = user_model
@@ -12,9 +16,10 @@ class PublisherSerializer(serializers.ModelSerializer):
 
 
 class EventSerializer(serializers.ModelSerializer):
+    """ Serializer for the Event model """
 
     publisher = PublisherSerializer(source='creator')
-    tags = serializers.SerializerMethodField() 
+    tags = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
@@ -25,4 +30,5 @@ class EventSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_tags(event):
+        """ Get the tags of an event """
         return event.tags.all().values_list('name', flat=True)
