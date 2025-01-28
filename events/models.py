@@ -16,7 +16,6 @@ thumbnail_storage = FileSystemStorage(
 )
 
 
-
 class Tag(models.Model):
     """ Model to store tags for events """
     name = models.CharField(max_length=100, unique=True)
