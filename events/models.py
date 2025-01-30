@@ -1,8 +1,18 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.files.storage import FileSystemStorage
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 User = get_user_model()
+video_storage = FileSystemStorage(
+    location=settings.MEDIA_ROOT / 'videos',
+    base_url=settings.MEDIA_URL + 'videos/'
+)
+thumbnail_storage = FileSystemStorage(
+    location=settings.MEDIA_ROOT / 'thumbnails',
+    base_url=settings.MEDIA_URL + 'thumbnails/'
+)
 
 
 class Tag(models.Model):
@@ -54,9 +64,9 @@ class VideoAsset(models.Model):
 
     event = models.ForeignKey(Event, on_delete=models.DO_NOTHING, related_name='videos')
     title = models.CharField(max_length=255)
-    cdn_url = models.URLField()
+    video_file = models.FileField(storage=video_storage, null=True, blank=True)
     duration = models.IntegerField()  # in seconds
-    thumbnail_url = models.URLField()
+    thumbnail = models.ImageField(storage=thumbnail_storage, null=True, blank=True)
     status = models.CharField(max_length=20, choices=VideoStatus.choices)
     file_size = models.BigIntegerField()  # in bytes
     created = models.DateTimeField(auto_now_add=True)
