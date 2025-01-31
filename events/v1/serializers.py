@@ -20,15 +20,23 @@ class EventSerializer(serializers.ModelSerializer):
 
     publisher = PublisherSerializer(source='creator')
     tags = serializers.SerializerMethodField()
+    thumbnail = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
         fields = (
-            'id', 'title', 'description', 'publisher', 'event_time', 'event_type', 'status', 'workstream_id',
-            'is_featured', 'tags'
+            'id', 'title', 'description', 'publisher', 'event_time',
+            'event_type', 'status', 'workstream_id', 'is_featured', 'tags',
+            'thumbnail'
         )
 
     @staticmethod
     def get_tags(event):
         """ Get the tags of an event """
         return event.tags.all().values_list('name', flat=True)
+
+    @staticmethod
+    def get_thumbnail(event):
+        """ Get thumbnail of an event if available """
+        video = event.videos.first()
+        return video.thumbnail.url if video and video.thumbnail else ''
