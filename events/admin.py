@@ -17,8 +17,8 @@ class VideoAssetForm(forms.ModelForm):
 
     def clean(self):
         """ Infer, save and clean the data related to videoasset """
-        cleaned_data = super(VideoAssetForm, self).clean()
-        # TODO: Access the google_drive_link from the form's cleaned_data
+        cleaned_data = super().clean()
+        # WIP: Access the google_drive_link from the form's cleaned_data
         # Download the video file, save the file in storage and set the
         # video_file field.
         cleaned_data.pop("google_drive_link")
@@ -26,16 +26,20 @@ class VideoAssetForm(forms.ModelForm):
 
 
 class VideoAssetInline(admin.StackedInline):
+    """ Cusotm StackedInline admin for VideoAsset """
+
     form = VideoAssetForm
     model = VideoAsset
     max_num = 1
     min_num = 1
     can_delete = False
-    # TODO: Automatically detect the file_size and video duration.
+    # WIP: Automatically detect the file_size and video duration.
     # readonly_fields = ('file_size', 'duration')
 
 
 class EventAdmin(admin.ModelAdmin):
+    """ Custom Admin for Event model """
+
     list_display = ('title', 'event_type', 'status', 'event_time', 'creator')
     list_filter = ('event_type', 'status', 'event_time')
     search_fields = ('title', 'description')
