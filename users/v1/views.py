@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -58,6 +59,12 @@ class LoginUserView(APIView):
 class HelloWorldView(APIView):
     """ View for testing the API """
 
+    @extend_schema(
+        responses={200: {"type": "string", "example": "Hello World"}}
+    )
     def get(self, request):
-        """ Get the response """
+        """
+        This endpoint returns a simple "Hello World" response.
+        It can be used to verify that the API is up and running.
+        """
         return Response("Hello World")
