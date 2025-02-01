@@ -18,6 +18,61 @@ class LoginUserView(APIView):
 
     permission_classes = []
 
+    @extend_schema(
+        request=LoginUserSerializer,
+        responses={
+            200: {
+                "type": "object",
+                "properties": {
+                    "refresh": {
+                        "type": "string",
+                        "description": "JWT refresh token",
+                        "example": "eyJ0eXAiOiJKV1QiLCJhbGc..."
+                    },
+                    "access": {
+                        "type": "string",
+                        "description": "JWT access token",
+                        "example": "eyJ0eXAiOiJKV1QiLCJhbGc..."
+                    },
+                    "user_info": {
+                        "type": "object",
+                        "properties": {
+                            "full_name": {
+                                "type": "string",
+                                "example": "John Doe"
+                            },
+                            "first_name": {
+                                "type": "string",
+                                "example": "John"
+                            },
+                            "last_name": {
+                                "type": "string",
+                                "example": "Doe"
+                            },
+                            "avatar": {
+                                "type": "string",
+                                "format": "uri",
+                                "example": "https://lh3.googleusercontent.com/a/photo"
+                            }
+                        }
+                    }
+                }
+            },
+            400: {
+                "type": "object",
+                "properties": {
+                    "detail": {
+                        "type": "string",
+                        "enum": [
+                            "Google Authentication failed",
+                            "Not arbisoft user."
+                        ]
+                    }
+                }
+            }
+        },
+        description="Authenticate user using Google OAuth2 token and return JWT tokens",
+    )
     def post(self, request):
         """ Log in the user """
 
