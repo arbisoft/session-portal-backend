@@ -31,12 +31,13 @@ class EventsListView(ListAPIView):
 
 
 class VideoAssetDetailView(RetrieveAPIView):
-    
+    """ View for listing the VideoAsset """
+
     serializer_class = VideoAssetSerializer
     
     def get_object(self):
         obj = get_object_or_404(
-            VideoAsset.objects.select_related('event__creator').prefetch_related('event__tags'), 
+            VideoAsset.objects.select_related('event__creator').prefetch_related('event__tags'),
             event_id=self.kwargs["pk"]
             )
         return obj
