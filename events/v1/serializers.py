@@ -32,7 +32,8 @@ class EventSerializer(serializers.ModelSerializer):
         return event.tags.all().values_list('name', flat=True)
 
 class VideoAssetSerializer(serializers.ModelSerializer):
-    
+    """ Serializer for the VideoAsset model """
+
     event = EventSerializer()
 
     class Meta:
@@ -40,4 +41,3 @@ class VideoAssetSerializer(serializers.ModelSerializer):
         fields = (
             'title', 'video_file', 'duration', 'thumbnail','status', 'file_size', 'event'
         )
-
