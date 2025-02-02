@@ -1,5 +1,6 @@
 from django.urls import path
-from .views import EventTypeListView, EventsListView, VideoAssetDetailView
+
+from .views import EventsListView, EventTypeListView, VideoAssetDetailView
 
 urlpatterns = [
     path('event_types/', EventTypeListView.as_view(), name='event-type-list'),
