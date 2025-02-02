@@ -29,7 +29,6 @@ class EventsListView(ListAPIView):
     filterset_class = EventFilter
 
 
-
 class VideoAssetDetailView(RetrieveAPIView):
     """ View for listing the VideoAsset """
 
