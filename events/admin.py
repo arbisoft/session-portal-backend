@@ -1,32 +1,11 @@
-from django import forms
 from django.contrib import admin
 
-from .models import Event, Tag, VideoAsset
-
-
-class VideoAssetForm(forms.ModelForm):
-    """ Custom form for VideoAsset Model """
-
-    google_drive_link = forms.CharField(
-        max_length=255, required=False, label="Google Drive Link (Optional)"
-    )
-
-    class Meta:
-        model = VideoAsset
-        fields = ('title', 'video_file', 'duration', 'thumbnail', 'file_size')
-
-    def clean(self):
-        """ Infer, save and clean the data related to videoasset """
-        cleaned_data = super().clean()
-        # WIP: Access the google_drive_link from the form's cleaned_data
-        # Download the video file, save the file in storage and set the
-        # video_file field.
-        cleaned_data.pop("google_drive_link")
-        return cleaned_data
+from events.models import Event, Tag, VideoAsset
+from events.forms import VideoAssetForm
 
 
 class VideoAssetInline(admin.StackedInline):
-    """ Cusotm StackedInline admin for VideoAsset """
+    """ Custom StackedInline admin for VideoAsset """
 
     form = VideoAssetForm
     model = VideoAsset
