@@ -137,3 +137,9 @@ docker-compose up --build
 ```
 
 Once the containers are up, check the API connection by visiting http://localhost:${DJANGO_PORT} to ensure the Django app is running properly.
+
+### Run Linting
+To run linting for the project, use the following command:
+
+```bash
+docker-compose --profile dev up lint

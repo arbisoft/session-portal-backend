@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:16
@@ -22,7 +20,9 @@ services:
       - asp-network
 
   django:
-    build: .
+    build:
+      context: .
+      target: app
     container_name: asp-django
     entrypoint: /entrypoint.sh
     command: bash -c "python manage.py runserver 0.0.0.0:${DJANGO_PORT}"
@@ -37,9 +37,23 @@ services:
     networks:
       - asp-network
 
+  lint:
+    profiles:
+      - dev
+    build:
+      context: .
+      target: dev
+    container_name: asp-lint
+    volumes:
+      - .:/app
+    environment:
+      - TOXENV=quality
+    command: tox
+    networks:
+      - asp-network
+
 volumes:
   asp-data:
 
 networks:
   asp-network:
-    driver: bridge
