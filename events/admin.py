@@ -1,7 +1,7 @@
 from django.contrib import admin
 
-from events.models import Event, Tag, VideoAsset
 from events.forms import VideoAssetForm
+from events.models import Event, Tag, VideoAsset
 
 
 class VideoAssetInline(admin.StackedInline):
@@ -33,7 +33,7 @@ class EventAdmin(admin.ModelAdmin):
     )
 
     def has_delete_permission(self, request, obj=None):
-        """ Do not allow delete of Event directly """
+        """ Do not allow deletion of Event directly """
         return False
 
 
