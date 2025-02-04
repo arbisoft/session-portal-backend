@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from django.contrib.auth import get_user_model
 
-from events.models import Event
+from events.models import Event, Tag
 
 user_model = get_user_model()
 
@@ -32,3 +32,10 @@ class EventSerializer(serializers.ModelSerializer):
     def get_tags(event):
         """ Get the tags of an event """
         return event.tags.all().values_list('name', flat=True)
+
+
+class TagListSerializer(serializers.ModelSerializer):
+    """ Serializer for Tag List View"""
+    class Meta:
+        model = Tag
+        fields = ('id', 'name')
