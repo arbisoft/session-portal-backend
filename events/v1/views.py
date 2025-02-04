@@ -7,9 +7,9 @@ from rest_framework.views import APIView
 
 from django.shortcuts import get_object_or_404
 
-from events.models import Event, VideoAsset, Tag
+from events.models import Event, Tag, VideoAsset
 from events.v1.filters import EventFilter
-from events.v1.serializers import EventSerializer, VideoAssetSerializer, TagListSerializer
+from events.v1.serializers import EventSerializer, TagListSerializer, VideoAssetSerializer
 
 
 class EventTypeListView(APIView):
@@ -62,11 +62,10 @@ class VideoAssetDetailView(RetrieveAPIView):
             )
         return obj
 
-      
+
 class TagListView(ListAPIView):
     """ View for listing all tags """
 
     queryset = Tag.objects.all()
     serializer_class = TagListSerializer
     pagination_class = None
-
