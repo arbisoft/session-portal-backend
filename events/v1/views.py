@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.pagination import PageNumberPagination
@@ -6,13 +7,31 @@ from rest_framework.views import APIView
 
 from django.shortcuts import get_object_or_404
 
-from events.models import Event, VideoAsset
+from events.models import Event, VideoAsset, Tag
 from events.v1.filters import EventFilter
-from events.v1.serializers import EventSerializer, VideoAssetSerializer
+from events.v1.serializers import EventSerializer, VideoAssetSerializer, TagListSerializer
 
 
 class EventTypeListView(APIView):
     """ View for listing the event types """
+
+    @extend_schema(
+        responses={
+            200: {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string", "example": "SESSION"},
+                        "key": {"type": "string", "example": "session"}
+                    }
+                },
+                "example": [
+                    {"label": "SESSION", "key": "session"}
+                ]
+            }
+        }
+    )
     def get(self, request, *args, **kwargs):
         """ Get the event types """
         event_types = [
@@ -42,3 +61,12 @@ class VideoAssetDetailView(RetrieveAPIView):
             event_id=self.kwargs["pk"]
             )
         return obj
+
+      
+class TagListView(ListAPIView):
+    """ View for listing all tags """
+
+    queryset = Tag.objects.all()
+    serializer_class = TagListSerializer
+    pagination_class = None
+
