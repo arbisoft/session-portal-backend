@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from django.contrib.auth import get_user_model
 
-from events.models import Event
+from events.models import Event, Tag
 
 user_model = get_user_model()
 
@@ -40,3 +40,10 @@ class EventSerializer(serializers.ModelSerializer):
         """ Get thumbnail of an event if available """
         video = event.videos.first()
         return video.thumbnail.url if video and video.thumbnail else ''
+
+
+class TagListSerializer(serializers.ModelSerializer):
+    """ Serializer for Tag List View"""
+    class Meta:
+        model = Tag
+        fields = ('id', 'name')

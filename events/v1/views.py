@@ -1,16 +1,35 @@
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.generics import ListAPIView
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from events.models import Event
+from events.models import Event, Tag
 from events.v1.filters import EventFilter
-from events.v1.serializers import EventSerializer
+from events.v1.serializers import EventSerializer, TagListSerializer
 
 
 class EventTypeListView(APIView):
     """ View for listing the event types """
+
+    @extend_schema(
+        responses={
+            200: {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string", "example": "SESSION"},
+                        "key": {"type": "string", "example": "session"}
+                    }
+                },
+                "example": [
+                    {"label": "SESSION", "key": "session"}
+                ]
+            }
+        }
+    )
     def get(self, request, *args, **kwargs):
         """ Get the event types """
         event_types = [
@@ -27,3 +46,11 @@ class EventsListView(ListAPIView):
     serializer_class = EventSerializer
     pagination_class = PageNumberPagination
     filterset_class = EventFilter
+
+
+class TagListView(ListAPIView):
+    """ View for listing all tags """
+
+    queryset = Tag.objects.all()
+    serializer_class = TagListSerializer
+    pagination_class = None

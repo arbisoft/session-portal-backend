@@ -6,6 +6,7 @@ django-cors-headers==4.6.0
 django-filter==24.3
 djangorestframework==3.15.2
 djangorestframework-simplejwt==5.3.1
+drf-spectacular==0.28.0
 idna==3.10
 Markdown==3.7
 pillow==11.1.0
