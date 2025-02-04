@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,6 +18,61 @@ class LoginUserView(APIView):
 
     permission_classes = []
 
+    @extend_schema(
+        request=LoginUserSerializer,
+        responses={
+            200: {
+                "type": "object",
+                "properties": {
+                    "refresh": {
+                        "type": "string",
+                        "description": "JWT refresh token",
+                        "example": "eyJ0eXAiOiJKV1QiLCJhbGc..."
+                    },
+                    "access": {
+                        "type": "string",
+                        "description": "JWT access token",
+                        "example": "eyJ0eXAiOiJKV1QiLCJhbGc..."
+                    },
+                    "user_info": {
+                        "type": "object",
+                        "properties": {
+                            "full_name": {
+                                "type": "string",
+                                "example": "John Doe"
+                            },
+                            "first_name": {
+                                "type": "string",
+                                "example": "John"
+                            },
+                            "last_name": {
+                                "type": "string",
+                                "example": "Doe"
+                            },
+                            "avatar": {
+                                "type": "string",
+                                "format": "uri",
+                                "example": "https://lh3.googleusercontent.com/a/photo"
+                            }
+                        }
+                    }
+                }
+            },
+            400: {
+                "type": "object",
+                "properties": {
+                    "detail": {
+                        "type": "string",
+                        "enum": [
+                            "Google Authentication failed",
+                            "Not arbisoft user."
+                        ]
+                    }
+                }
+            }
+        },
+        description="Authenticate user using Google OAuth2 token and return JWT tokens",
+    )
     def post(self, request):
         """ Log in the user """
 
@@ -58,6 +114,12 @@ class LoginUserView(APIView):
 class HelloWorldView(APIView):
     """ View for testing the API """
 
+    @extend_schema(
+        responses={200: {"type": "string", "example": "Hello World"}}
+    )
     def get(self, request):
-        """ Get the response """
+        """
+        This endpoint returns a simple "Hello World" response.
+        It can be used to verify that the API is up and running.
+        """
         return Response("Hello World")
