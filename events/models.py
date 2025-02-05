@@ -82,11 +82,10 @@ class VideoAsset(models.Model):
             self.file_size = self.video_file.size
             video_path = self.video_file.path
             try:
-                video_path = '/app/xyz.mp4'
                 metadata = ffmpeg.probe(video_path)
                 duration = float(metadata['format']['duration'])
                 self.duration = int(duration)  # Convert to seconds
-            except ffmpeg._run.Error as e:
+            except ffmpeg.Error as e:
                 print(f"FFmpeg processing error: {e.stderr.decode() if hasattr(e, 'stderr') else e}")
             except KeyError:
                 print("Metadata does not contain 'duration'. Invalid file format.")
