@@ -28,7 +28,7 @@ services:
     command: bash -c "python manage.py runserver 0.0.0.0:${DJANGO_PORT}"
     volumes:
       - .:/app
-      - ./media:/app/media
+      - ./media:/app/arbisoft_sessions_portal/media
     ports:
       - "${DJANGO_PORT}:${DJANGO_PORT}"
     depends_on:
