@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from django.contrib.auth import get_user_model
 
-from events.models import Event, Tag
+from events.models import Event, Tag, VideoAsset
 
 user_model = get_user_model()
 
@@ -40,6 +40,18 @@ class EventSerializer(serializers.ModelSerializer):
         """ Get thumbnail of an event if available """
         video = event.videos.first()
         return video.thumbnail.url if video and video.thumbnail else ''
+
+
+class VideoAssetSerializer(serializers.ModelSerializer):
+    """ Serializer for the VideoAsset model """
+
+    event = EventSerializer()
+
+    class Meta:
+        model = VideoAsset
+        fields = (
+            'title', 'video_file', 'duration', 'thumbnail', 'status', 'file_size', 'event'
+        )
 
 
 class TagListSerializer(serializers.ModelSerializer):
