@@ -1,4 +1,5 @@
 from django import forms
+from django.core.exceptions import ValidationError
 
 from events.models import VideoAsset
 from events.tasks import download_google_drive_video
@@ -8,7 +9,10 @@ class VideoAssetForm(forms.ModelForm):
     """ Custom form for VideoAsset Model """
 
     google_drive_link = forms.CharField(
-        max_length=255, required=False, label="Google Drive Link (Optional)"
+        max_length=255,
+        required=False,
+        label="Google Drive Link (Optional)",
+        help_text="Ensure the link is publicly accessible for successful download."
     )
 
     class Meta:
@@ -24,8 +28,11 @@ class VideoAssetForm(forms.ModelForm):
         google_drive_link = cleaned_data.get('google_drive_link')
         video_file = cleaned_data.get('video_file')
 
-        if not google_drive_link and not video_file:
-            self.add_error('google_drive_link', 'Please upload a video or provide a Google Drive link.')
+        if not video_file and not google_drive_link:
+            raise ValidationError("You must provide either a video file or a Google Drive link.")
+
+        if video_file and google_drive_link:
+            raise ValidationError("Please provide only one: either a video file or a Google Drive link.")
 
         return cleaned_data
 
