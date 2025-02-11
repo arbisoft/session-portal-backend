@@ -1,6 +1,7 @@
 from django import forms
 
 from events.models import VideoAsset
+from events.tasks import download_google_drive_video
 
 
 class VideoAssetForm(forms.ModelForm):
@@ -20,5 +21,21 @@ class VideoAssetForm(forms.ModelForm):
         # WIP: Access the google_drive_link from the form's cleaned_data
         # Download the video file, save the file in storage and set the
         # video_file field.
-        cleaned_data.pop("google_drive_link")
+        google_drive_link = cleaned_data.get('google_drive_link')
+        video_file = cleaned_data.get('video_file')
+
+        if not google_drive_link and not video_file:
+            self.add_error('google_drive_link', 'Please upload a video or provide a Google Drive link.')
+
         return cleaned_data
+
+    def save(self, commit=True):
+        google_drive_link = self.cleaned_data.get('google_drive_link')
+        video_asset = super().save()
+
+        if google_drive_link:
+            print(google_drive_link, video_asset.id)
+            download_google_drive_video.delay(video_asset.id, google_drive_link)
+            video_asset.status = VideoAsset.VideoStatus.PROCESSING
+
+        return video_asset
