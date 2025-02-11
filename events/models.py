@@ -96,6 +96,7 @@ class VideoAsset(models.Model):
             except ValueError:
                 logger.error("Invalid duration value, unable to convert to float.")
 
+            self.status = VideoAsset.VideoStatus.READY
         super().save(*args, **kwargs)
 
     def __str__(self):

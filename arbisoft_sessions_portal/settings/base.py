@@ -168,6 +168,8 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
 }
 
+CELERY_BROKER_URL = "redis://redis:6379/0"
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,

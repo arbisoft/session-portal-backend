@@ -19,6 +19,20 @@ services:
     networks:
       - asp-network
 
+  redis:
+    container_name: redis
+    image: redis:5.0.5
+    restart: always
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - asp-network
+
   django:
     build:
       context: .
@@ -34,6 +48,28 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      celery:
+        condition: service_started
+    networks:
+      - asp-network
+
+  celery:
+    container_name: celery
+    restart: always
+    build:
+      context: .
+      target: app
+    command: celery -A arbisoft_sessions_portal worker -l info --logfile celery.log
+    environment:
+      - C_FORCE_ROOT=true
+    depends_on:
+      redis:
+        condition: service_started
+    volumes:
+      - .:/app
+      - ./media:/app/arbisoft_sessions_portal/media
     networks:
       - asp-network
 
