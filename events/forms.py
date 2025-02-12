@@ -22,9 +22,6 @@ class VideoAssetForm(forms.ModelForm):
     def clean(self):
         """ Infer, save and clean the data related to videoasset """
         cleaned_data = super().clean()
-        # WIP: Access the google_drive_link from the form's cleaned_data
-        # Download the video file, save the file in storage and set the
-        # video_file field.
         google_drive_link = cleaned_data.get('google_drive_link')
         video_file = cleaned_data.get('video_file')
 
