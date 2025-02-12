@@ -41,8 +41,8 @@ class VideoAssetForm(forms.ModelForm):
         video_asset = super().save()
 
         if google_drive_link:
-            print(google_drive_link, video_asset.id)
             download_google_drive_video.delay(video_asset.id, google_drive_link)
             video_asset.status = VideoAsset.VideoStatus.PROCESSING
+            video_asset.save()
 
         return video_asset
