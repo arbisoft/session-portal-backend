@@ -132,7 +132,9 @@ Before you begin, ensure that you have the following installed:
 ### Build and Start Docker Containers
 This command will rebuild and start all the services using the configuration defined in docker-compose.yaml
 
-```
+```bash
+export GID=$(id -g)
+export UID=$(id -u)
 docker-compose up --build 
 ```
 
