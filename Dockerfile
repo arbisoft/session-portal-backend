@@ -35,7 +35,7 @@ COPY --from=app_venv_production ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 
 COPY . /app/
 
-RUN chmod +x entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 USER app
 
