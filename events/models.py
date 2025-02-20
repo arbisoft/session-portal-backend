@@ -1,3 +1,5 @@
+import logging
+
 import ffmpeg
 
 from django.conf import settings
@@ -5,6 +7,8 @@ from django.contrib.auth import get_user_model
 from django.core.files.storage import FileSystemStorage
 from django.db import models
 from django.utils.translation import gettext_lazy as _
+
+logger = logging.getLogger("asp_api")
 
 User = get_user_model()
 video_storage = FileSystemStorage(
@@ -86,11 +90,11 @@ class VideoAsset(models.Model):
                 duration = float(metadata['format']['duration'])
                 self.duration = int(duration)  # Convert to seconds
             except ffmpeg.Error as e:
-                print(f"FFmpeg processing error: {e.stderr.decode() if hasattr(e, 'stderr') else e}")
+                logger.error("FFmpeg processing error: %s", e.stderr.decode() if hasattr(e, 'stderr') else e)
             except KeyError:
-                print("Metadata does not contain 'duration'. Invalid file format.")
+                logger.error("Metadata does not contain 'duration'. Invalid file format.")
             except ValueError:
-                print("Invalid duration value, unable to convert to float.")
+                logger.error("Invalid duration value, unable to convert to float.")
 
         super().save(*args, **kwargs)
 
