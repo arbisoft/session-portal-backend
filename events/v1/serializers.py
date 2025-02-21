@@ -21,13 +21,14 @@ class EventSerializer(serializers.ModelSerializer):
     publisher = PublisherSerializer(source='creator')
     tags = serializers.SerializerMethodField()
     thumbnail = serializers.SerializerMethodField()
+    video_duration = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
         fields = (
             'id', 'title', 'description', 'publisher', 'event_time',
             'event_type', 'status', 'workstream_id', 'is_featured', 'tags',
-            'thumbnail'
+            'thumbnail', 'video_duration'
         )
 
     @staticmethod
@@ -40,6 +41,12 @@ class EventSerializer(serializers.ModelSerializer):
         """ Get thumbnail of an event if available """
         video = event.videos.first()
         return video.thumbnail.url if video and video.thumbnail else ''
+
+    @staticmethod
+    def get_video_duration(event):
+        """ Get duration of video if available """
+        video = event.videos.first()
+        return video.duration if video and video.duration else None
 
 
 class VideoAssetSerializer(serializers.ModelSerializer):
