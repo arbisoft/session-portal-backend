@@ -1,4 +1,5 @@
 asgiref==3.8.1
+celery==5.4.0
 certifi==2024.8.30
 charset-normalizer==3.4.0
 Django==4.2.16
@@ -14,6 +15,7 @@ pillow==11.1.0
 psycopg2-binary==2.9.10
 python-dotenv==1.0.1
 PyJWT==2.9.0
+redis==5.2.1
 requests==2.32.3
 setuptools==75.1.0
 sqlparse==0.5.1
