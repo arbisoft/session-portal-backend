@@ -10,6 +10,7 @@ class EventFilter(django_filters.rest_framework.FilterSet):
 
     search = django_filters.CharFilter(method='filter_search')
     tag = django_filters.CharFilter(method='filter_tag')
+    ordering = django_filters.OrderingFilter(fields=("event_type", "is_featured", "status"))
 
     class Meta:
         model = Event

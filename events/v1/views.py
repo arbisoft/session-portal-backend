@@ -1,7 +1,6 @@
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.generics import ListAPIView, RetrieveAPIView
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -9,6 +8,7 @@ from django.shortcuts import get_object_or_404
 
 from events.models import Event, Tag, VideoAsset
 from events.v1.filters import EventFilter
+from events.v1.pagination import CustomPageNumberPagination
 from events.v1.serializers import EventSerializer, TagListSerializer, VideoAssetSerializer
 
 
@@ -44,9 +44,9 @@ class EventTypeListView(APIView):
 class EventsListView(ListAPIView):
     """ View for listing the events """
 
-    queryset = Event.objects.all()
+    queryset = Event.objects.all().order_by("-status")
     serializer_class = EventSerializer
-    pagination_class = PageNumberPagination
+    pagination_class = CustomPageNumberPagination
     filterset_class = EventFilter
 
 
