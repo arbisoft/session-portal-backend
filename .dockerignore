@@ -1,0 +1,60 @@
+# Git directories and files
+.git
+.gitignore
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+
+# Ignore media
+media/
+
+# Ignore media directory
+media/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Local environment & config files (if any)
+*.env
+.env.*
+**/private.**
+local.py
+
+# Build/Distribution directories
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# Node-related files/directories (if you’re using Node for static assets)
+node_modules/
+
+# Logs and temporary files
+*.log
+*.sqlite3
+*.pid
+*.seed
+*.backup
+*.orig
+
+# Coverage, test reports, & lint caches
+htmlcov/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+junit-*.xml
+
+# Editor/IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker-related
+.dockerignore
+docker-compose*.yml

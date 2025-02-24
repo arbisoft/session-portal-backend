@@ -37,8 +37,11 @@ services:
     build:
       context: .
       target: app
+      args:
+        UID: ${UID}
+        GID: ${GID}
     container_name: asp-django
-    entrypoint: /entrypoint.sh
+    entrypoint: /app/entrypoint.sh
     command: bash -c "python manage.py runserver 0.0.0.0:${DJANGO_PORT}"
     volumes:
       - .:/app
@@ -77,6 +80,9 @@ services:
     build:
       context: .
       target: dev
+      args:
+        UID: ${UID}
+        GID: ${GID}
     container_name: asp-lint
     volumes:
       - .:/app
