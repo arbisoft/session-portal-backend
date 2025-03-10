@@ -1,5 +1,6 @@
 from django import forms
 from django.core.exceptions import ValidationError
+from django.forms import TextInput
 
 from events.models import VideoAsset
 from events.tasks import download_google_drive_video
@@ -12,7 +13,8 @@ class VideoAssetForm(forms.ModelForm):
         max_length=255,
         required=False,
         label="Google Drive Link (Optional)",
-        help_text="Ensure the link is publicly accessible for successful download."
+        help_text="Ensure the link is publicly accessible for successful download.",
+        widget=TextInput(attrs={"style": "width: 100%"}),
     )
 
     class Meta:
