@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.db import models
-from django.forms import TextInput, Textarea
+from django.forms import Textarea, TextInput
 
 from events.forms import VideoAssetForm
 from events.models import Event, Tag, VideoAsset
