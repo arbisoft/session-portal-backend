@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from django.contrib.auth import get_user_model
 
-from events.models import Event, Tag, VideoAsset
+from events.models import Event, Playlist, Tag, VideoAsset
 from users.v1.serializers import UserSerializer
 
 user_model = get_user_model()
@@ -24,13 +24,14 @@ class EventSerializer(serializers.ModelSerializer):
     thumbnail = serializers.SerializerMethodField()
     video_duration = serializers.SerializerMethodField()
     presenters = serializers.SerializerMethodField()
+    playlists = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
         fields = (
             'id', 'title', 'description', 'publisher', 'event_time',
             'event_type', 'status', 'workstream_id', 'is_featured', 'tags',
-            'thumbnail', 'video_duration', 'presenters'
+            'thumbnail', 'video_duration', 'presenters', 'playlists'
         )
 
     @staticmethod
@@ -51,11 +52,16 @@ class EventSerializer(serializers.ModelSerializer):
         return video.duration if video and video.duration else None
 
     @staticmethod
-    def get_presenters(obj):
+    def get_presenters(event):
         """ Fetch presenters' full details (user id, first_name, last_name, email)"""
         return UserSerializer(
-            [ep.user for ep in obj.presenters.all()], many=True
+            [ep.user for ep in event.presenters.all()], many=True
         ).data
+    
+    @staticmethod
+    def get_playlists(event):
+        """ Get the playlists of an event """
+        return event.playlists.all().values_list('name', flat=True)
 
 
 class VideoAssetSerializer(serializers.ModelSerializer):
@@ -74,4 +80,11 @@ class TagListSerializer(serializers.ModelSerializer):
     """ Serializer for Tag List View"""
     class Meta:
         model = Tag
+        fields = ('id', 'name')
+
+
+class PlaylistListSerializer(serializers.ModelSerializer):
+    """ Serializer for Playlist List View"""
+    class Meta:
+        model = Playlist
         fields = ('id', 'name')
