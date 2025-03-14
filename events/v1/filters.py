@@ -31,7 +31,7 @@ class EventFilter(django_filters.rest_framework.FilterSet):
         return queryset.filter(
             tags__name=value
         )
-    
+
     def filter_playlist(self, queryset, _, value):
         """ Filter the queryset based on the playlist value """
         return queryset.filter(

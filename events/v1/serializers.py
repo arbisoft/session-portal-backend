@@ -57,7 +57,7 @@ class EventSerializer(serializers.ModelSerializer):
         return UserSerializer(
             [ep.user for ep in event.presenters.all()], many=True
         ).data
-    
+
     @staticmethod
     def get_playlists(event):
         """ Get the playlists of an event """
