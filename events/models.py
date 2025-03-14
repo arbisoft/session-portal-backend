@@ -100,3 +100,12 @@ class VideoAsset(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class EventPresenter(models.Model):
+    """ Model to store presenters for an event """
+    event = models.ForeignKey(Event, on_delete=models.DO_NOTHING, related_name='presenters')
+    user = models.ForeignKey(User, on_delete=models.DO_NOTHING, related_name='events_presented')
+
+    def __str__(self):
+        return f"{self.user.first_name} {self.user.last_name}"

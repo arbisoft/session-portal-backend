@@ -3,6 +3,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 
 from events.models import Event, Tag, VideoAsset
+from users.v1.serializers import UserSerializer
 
 user_model = get_user_model()
 
@@ -22,13 +23,14 @@ class EventSerializer(serializers.ModelSerializer):
     tags = serializers.SerializerMethodField()
     thumbnail = serializers.SerializerMethodField()
     video_duration = serializers.SerializerMethodField()
+    presenters = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
         fields = (
             'id', 'title', 'description', 'publisher', 'event_time',
             'event_type', 'status', 'workstream_id', 'is_featured', 'tags',
-            'thumbnail', 'video_duration'
+            'thumbnail', 'video_duration', 'presenters'
         )
 
     @staticmethod
@@ -47,6 +49,13 @@ class EventSerializer(serializers.ModelSerializer):
         """ Get duration of video if available """
         video = event.videos.first()
         return video.duration if video and video.duration else None
+
+    @staticmethod
+    def get_presenters(obj):
+        """ Fetch presenters' full details (user id, first_name, last_name, email)"""
+        return UserSerializer(
+            [ep.user for ep in obj.presenters.all()], many=True
+        ).data
 
 
 class VideoAssetSerializer(serializers.ModelSerializer):
