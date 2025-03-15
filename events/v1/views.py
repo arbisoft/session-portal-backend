@@ -77,3 +77,24 @@ class PlaylistListView(ListAPIView):
     queryset = Playlist.objects.all()
     serializer_class = PlaylistListSerializer
     pagination_class = None
+
+
+class EventRecommendationView(APIView):
+    """ View for listing similar events """
+
+    def get(self, request, event_id, *args, **kwargs):
+        """ Get similar events based on the same playlist, preseneter or tags """
+        event = get_object_or_404(Event, id=event_id)
+
+        similar_events = Event.objects.filter(playlists__in=event.playlists.all()).exclude(id=event.id)
+
+        if not similar_events.exists():
+            similar_events = Event.objects.filter(
+                presenters__user__in=event.presenters.values('user')
+            ).exclude(id=event.id)
+
+        if not similar_events.exists():
+            similar_events = Event.objects.filter(tags__in=event.tags.all()).exclude(id=event.id)
+
+        serializer = EventSerializer(similar_events, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
