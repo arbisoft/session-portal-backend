@@ -2,8 +2,7 @@ from rest_framework import serializers
 
 from django.contrib.auth import get_user_model
 
-from events.models import Event, Playlist, Tag, VideoAsset
-from users.v1.serializers import UserSerializer
+from events.models import Event, EventPresenter, Playlist, Tag, VideoAsset
 
 user_model = get_user_model()
 
@@ -16,6 +15,18 @@ class PublisherSerializer(serializers.ModelSerializer):
         fields = ('id', 'first_name', 'last_name')
 
 
+class EventPresenterSerializer(serializers.ModelSerializer):
+    """ Serializer for the EventPresenter model """
+    first_name = serializers.CharField(source='user.first_name')
+    last_name = serializers.CharField(source='user.last_name')
+    user_id = serializers.IntegerField(source='user.id')
+    email = serializers.EmailField(source='user.email')
+
+    class Meta:
+        model = EventPresenter
+        fields = ('user_id', 'first_name', 'last_name', 'email')
+
+
 class EventSerializer(serializers.ModelSerializer):
     """ Serializer for the Event model """
 
@@ -25,6 +36,7 @@ class EventSerializer(serializers.ModelSerializer):
     video_duration = serializers.SerializerMethodField()
     presenters = serializers.SerializerMethodField()
     playlists = serializers.SerializerMethodField()
+
 
     class Meta:
         model = Event
@@ -53,10 +65,9 @@ class EventSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_presenters(event):
-        """ Fetch presenters' full details (user id, first_name, last_name, email)"""
-        return UserSerializer(
-            [ep.user for ep in event.presenters.all()], many=True
-        ).data
+        """ Get presenters of an event """
+        event_presenters = EventPresenter.objects.filter(event=event).select_related('user')
+        return EventPresenterSerializer(event_presenters, many=True).data
 
     @staticmethod
     def get_playlists(event):

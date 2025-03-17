@@ -65,6 +65,7 @@ class Event(models.Model):
     is_featured = models.BooleanField(default=False)
     tags = models.ManyToManyField(Tag, related_name='events')
     playlists = models.ManyToManyField(Playlist, related_name='events')
+    presenters = models.ManyToManyField(User, through='EventPresenter', related_name='events_presented')
     created = models.DateTimeField(auto_now_add=True)
     modified = models.DateTimeField(auto_now=True)
 
@@ -116,8 +117,11 @@ class VideoAsset(models.Model):
 
 class EventPresenter(models.Model):
     """ Model to store presenters for an event """
-    event = models.ForeignKey(Event, on_delete=models.DO_NOTHING, related_name='presenters')
-    user = models.ForeignKey(User, on_delete=models.DO_NOTHING, related_name='events_presented')
+    event = models.ForeignKey(Event, on_delete=models.DO_NOTHING)
+    user = models.ForeignKey(User, on_delete=models.DO_NOTHING)
+
+    class Meta:
+        unique_together = ('event', 'user')
 
     def __str__(self):
         return f"{self.user.first_name} {self.user.last_name}"
