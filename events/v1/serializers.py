@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from django.contrib.auth import get_user_model
 
-from events.models import Event, EventPresenter, Tag, VideoAsset
+from events.models import Event, EventPresenter, Playlist, Tag, VideoAsset
 
 user_model = get_user_model()
 
@@ -35,13 +35,14 @@ class EventSerializer(serializers.ModelSerializer):
     thumbnail = serializers.SerializerMethodField()
     video_duration = serializers.SerializerMethodField()
     presenters = serializers.SerializerMethodField()
+    playlists = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
         fields = (
             'id', 'title', 'description', 'publisher', 'event_time',
             'event_type', 'status', 'workstream_id', 'is_featured', 'tags',
-            'thumbnail', 'video_duration', 'presenters'
+            'thumbnail', 'video_duration', 'presenters', 'playlists'
         )
 
     @staticmethod
@@ -67,6 +68,11 @@ class EventSerializer(serializers.ModelSerializer):
         event_presenters = EventPresenter.objects.filter(event=event).select_related('user')
         return EventPresenterSerializer(event_presenters, many=True).data
 
+    @staticmethod
+    def get_playlists(event):
+        """ Get the playlists of an event """
+        return event.playlists.all().values_list('name', flat=True)
+
 
 class VideoAssetSerializer(serializers.ModelSerializer):
     """ Serializer for the VideoAsset model """
@@ -84,4 +90,11 @@ class TagListSerializer(serializers.ModelSerializer):
     """ Serializer for Tag List View"""
     class Meta:
         model = Tag
+        fields = ('id', 'name')
+
+
+class PlaylistListSerializer(serializers.ModelSerializer):
+    """ Serializer for Playlist List View"""
+    class Meta:
+        model = Playlist
         fields = ('id', 'name')

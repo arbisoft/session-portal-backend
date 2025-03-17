@@ -3,7 +3,7 @@ from django.db import models
 from django.forms import Textarea, TextInput
 
 from events.forms import EventPresenterForm, VideoAssetForm
-from events.models import Event, EventPresenter, Tag, VideoAsset
+from events.models import Event, EventPresenter, Playlist, Tag, VideoAsset
 
 
 class VideoAssetInline(admin.StackedInline):
@@ -34,7 +34,7 @@ class EventAdmin(admin.ModelAdmin):
     list_display = ('title', 'event_type', 'status', 'event_time', 'creator', 'get_presenters')
     list_filter = ('event_type', 'status', 'event_time')
     search_fields = ('title', 'description')
-    filter_horizontal = ('tags', )
+    filter_horizontal = ('tags', 'playlists')
     formfield_overrides = {
         models.CharField: {'widget': TextInput(attrs={'style': 'width: 100%'})},
         models.TextField: {'widget': Textarea(attrs={'style': 'width: 100%'})},
@@ -48,7 +48,7 @@ class EventAdmin(admin.ModelAdmin):
         (None, {
             'fields': ('creator', 'title', 'description', 'event_time',
                        'event_type', 'status', 'workstream_id', 'is_featured',
-                       'tags')
+                       'tags', 'playlists')
         }),
     )
 
@@ -64,4 +64,5 @@ class EventAdmin(admin.ModelAdmin):
 
 
 admin.site.register(Event, EventAdmin)
+admin.site.register(Playlist)
 admin.site.register(Tag)

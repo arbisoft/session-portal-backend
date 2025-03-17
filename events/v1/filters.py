@@ -10,6 +10,7 @@ class EventFilter(django_filters.rest_framework.FilterSet):
 
     search = django_filters.CharFilter(method='filter_search')
     tag = django_filters.CharFilter(method='filter_tag')
+    playlist = django_filters.CharFilter(method='filter_playlist')
     ordering = django_filters.OrderingFilter(fields=("event_type", "is_featured", "status"))
 
     class Meta:
@@ -29,4 +30,10 @@ class EventFilter(django_filters.rest_framework.FilterSet):
         """ Filter the queryset based on the tag value """
         return queryset.filter(
             tags__name=value
+        )
+
+    def filter_playlist(self, queryset, _, value):
+        """ Filter the queryset based on the playlist value """
+        return queryset.filter(
+            playlists__name=value
         )
