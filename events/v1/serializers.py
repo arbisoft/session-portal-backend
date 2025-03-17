@@ -2,8 +2,7 @@ from rest_framework import serializers
 
 from django.contrib.auth import get_user_model
 
-from events.models import Event, Tag, VideoAsset
-from users.v1.serializers import UserSerializer
+from events.models import Event, EventPresenter, Tag, VideoAsset
 
 user_model = get_user_model()
 
@@ -14,6 +13,18 @@ class PublisherSerializer(serializers.ModelSerializer):
     class Meta:
         model = user_model
         fields = ('id', 'first_name', 'last_name')
+
+
+class EventPresenterSerializer(serializers.ModelSerializer):
+    """ Serializer for the EventPresenter model """
+    first_name = serializers.CharField(source='user.first_name')
+    last_name = serializers.CharField(source='user.last_name')
+    user_id = serializers.IntegerField(source='user.id')
+    email = serializers.EmailField(source='user.email')
+
+    class Meta:
+        model = EventPresenter
+        fields = ('user_id', 'first_name', 'last_name', 'email')
 
 
 class EventSerializer(serializers.ModelSerializer):
@@ -51,11 +62,10 @@ class EventSerializer(serializers.ModelSerializer):
         return video.duration if video and video.duration else None
 
     @staticmethod
-    def get_presenters(obj):
-        """ Fetch presenters' full details (user id, first_name, last_name, email)"""
-        return UserSerializer(
-            [ep.user for ep in obj.presenters.all()], many=True
-        ).data
+    def get_presenters(event):
+        """ Get presenters of an event """
+        event_presenters = EventPresenter.objects.filter(event=event).select_related('user')
+        return EventPresenterSerializer(event_presenters, many=True).data
 
 
 class VideoAssetSerializer(serializers.ModelSerializer):

@@ -31,7 +31,7 @@ class EventPresenterInline(admin.StackedInline):
 class EventAdmin(admin.ModelAdmin):
     """ Custom Admin for Event model """
 
-    list_display = ('title', 'event_type', 'status', 'event_time', 'creator', 'get_presenters')
+    list_display = ('title', 'event_type', 'status', 'event_time', 'creator',)
     list_filter = ('event_type', 'status', 'event_time')
     search_fields = ('title', 'description')
     filter_horizontal = ('tags', )
