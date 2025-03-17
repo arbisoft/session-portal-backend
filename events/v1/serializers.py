@@ -37,7 +37,6 @@ class EventSerializer(serializers.ModelSerializer):
     presenters = serializers.SerializerMethodField()
     playlists = serializers.SerializerMethodField()
 
-
     class Meta:
         model = Event
         fields = (
