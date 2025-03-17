@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from django.contrib.auth import get_user_model
 
-from events.models import Event, Tag, VideoAsset
+from events.models import Event, EventPresenter, Tag, VideoAsset
 
 user_model = get_user_model()
 
@@ -15,6 +15,18 @@ class PublisherSerializer(serializers.ModelSerializer):
         fields = ('id', 'first_name', 'last_name')
 
 
+class EventPresenterSerializer(serializers.ModelSerializer):
+    """ Serializer for the EventPresenter model """
+    first_name = serializers.CharField(source='user.first_name')
+    last_name = serializers.CharField(source='user.last_name')
+    user_id = serializers.IntegerField(source='user.id')
+    email = serializers.EmailField(source='user.email')
+
+    class Meta:
+        model = EventPresenter
+        fields = ('user_id', 'first_name', 'last_name', 'email')
+
+
 class EventSerializer(serializers.ModelSerializer):
     """ Serializer for the Event model """
 
@@ -22,13 +34,14 @@ class EventSerializer(serializers.ModelSerializer):
     tags = serializers.SerializerMethodField()
     thumbnail = serializers.SerializerMethodField()
     video_duration = serializers.SerializerMethodField()
+    presenters = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
         fields = (
             'id', 'title', 'description', 'publisher', 'event_time',
             'event_type', 'status', 'workstream_id', 'is_featured', 'tags',
-            'thumbnail', 'video_duration'
+            'thumbnail', 'video_duration', 'presenters'
         )
 
     @staticmethod
@@ -47,6 +60,12 @@ class EventSerializer(serializers.ModelSerializer):
         """ Get duration of video if available """
         video = event.videos.first()
         return video.duration if video and video.duration else None
+
+    @staticmethod
+    def get_presenters(event):
+        """ Get presenters of an event """
+        event_presenters = EventPresenter.objects.filter(event=event).select_related('user')
+        return EventPresenterSerializer(event_presenters, many=True).data
 
 
 class VideoAssetSerializer(serializers.ModelSerializer):

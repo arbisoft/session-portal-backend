@@ -1,9 +1,12 @@
 from django import forms
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.forms import TextInput
 
-from events.models import VideoAsset
+from events.models import EventPresenter, VideoAsset
 from events.tasks import download_google_drive_video
+
+User = get_user_model()
 
 
 class VideoAssetForm(forms.ModelForm):
@@ -45,3 +48,19 @@ class VideoAssetForm(forms.ModelForm):
             video_asset.save()
 
         return video_asset
+
+
+class EventPresenterForm(forms.ModelForm):
+    """ Custom form to show first_name and last_name in the dropdown """
+    user = forms.ModelChoiceField(
+        queryset=User.objects.all().order_by("first_name", "last_name"),
+        label="Presenter"
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["user"].label_from_instance = lambda obj: f"{obj.first_name} {obj.last_name}"
+
+    class Meta:
+        model = EventPresenter
+        fields = "__all__"
