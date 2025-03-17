@@ -58,7 +58,7 @@ class EventAdmin(admin.ModelAdmin):
 
     def get_presenters(self, obj):
         """ Fetch Presenter First Name and Last Name """
-        return ", ".join([f"{p.user.first_name} {p.user.last_name}" for p in obj.presenters.all()])
+        return ", ".join([f"{p.first_name} {p.last_name}" for p in obj.presenters.all()])
 
     get_presenters.short_description = "Presenters"
 

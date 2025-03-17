@@ -13,9 +13,7 @@ def get_similar_events(event_id):
     similar_events = Event.objects.filter(playlists__in=event.playlists.all()).exclude(id=event.id).distinct()
 
     if not similar_events.exists():
-        similar_events = Event.objects.filter(
-            presenters__user__in=event.presenters.values('user')
-        ).exclude(id=event.id).distinct()
+        similar_events = Event.objects.filter(presenters__in=event.presenters.all()).exclude(id=event.id).distinct()
 
     if not similar_events.exists():
         similar_events = Event.objects.filter(tags__in=event.tags.all()).exclude(id=event.id).distinct()
