@@ -10,6 +10,7 @@ from events.models import Event, Playlist, Tag, VideoAsset
 from events.v1.filters import EventFilter
 from events.v1.pagination import CustomPageNumberPagination
 from events.v1.serializers import EventSerializer, PlaylistListSerializer, TagListSerializer, VideoAssetSerializer
+from events.v1.utils import get_similar_events
 
 
 class EventTypeListView(APIView):
@@ -77,3 +78,13 @@ class PlaylistListView(ListAPIView):
     queryset = Playlist.objects.all()
     serializer_class = PlaylistListSerializer
     pagination_class = None
+
+
+class EventRecommendationsView(APIView):
+    """ View for listing similar events """
+
+    def get(self, request, event_id, *args, **kwargs):
+        """ Get similar events based on the same playlist, presenter or tags """
+        similar_events = get_similar_events(event_id)
+        serializer = EventSerializer(similar_events, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
