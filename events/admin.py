@@ -47,7 +47,7 @@ class EventAdmin(admin.ModelAdmin):
     fieldsets = (
         (None, {
             'fields': ('creator', 'title', 'description', 'event_time',
-                       'event_type', 'status', 'workstream_id', 'is_featured',
+                       'event_type', 'status', 'is_featured',
                        'tags', 'playlists')
         }),
     )

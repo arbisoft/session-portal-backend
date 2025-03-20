@@ -41,7 +41,7 @@ class EventSerializer(serializers.ModelSerializer):
         model = Event
         fields = (
             'id', 'title', 'description', 'publisher', 'event_time',
-            'event_type', 'status', 'workstream_id', 'is_featured', 'tags',
+            'event_type', 'status', 'is_featured', 'tags',
             'thumbnail', 'video_duration', 'presenters', 'playlists'
         )
 
