@@ -11,7 +11,8 @@ class EventFilter(django_filters.rest_framework.FilterSet):
     search = django_filters.CharFilter(method='filter_search')
     tag = django_filters.CharFilter(method='filter_tag')
     playlist = django_filters.CharFilter(method='filter_playlist')
-    ordering = django_filters.OrderingFilter(fields=("event_type", "is_featured", "status"))
+    event_time = django_filters.DateFromToRangeFilter(field_name="event_time")
+    ordering = django_filters.OrderingFilter(fields=("event_time", "event_type", "is_featured", "status"))
 
     class Meta:
         model = Event
