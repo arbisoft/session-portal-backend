@@ -30,6 +30,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Install system dependencies
+      run: |
+        apt-get update
+        apt-get install -y ffmpeg
+
     - name: Set up Python 3.12
       uses: actions/setup-python@v4
       with:
@@ -47,7 +52,6 @@ jobs:
 
     - name: Run Tests
       env:
-        # Ensure these match your test settings
         DJANGO_SETTINGS_MODULE: arbisoft_sessions_portal.settings.test
         DB_USER: testuser
         DB_PASSWORD: testpassword
