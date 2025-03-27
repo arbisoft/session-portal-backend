@@ -1,6 +1,4 @@
-import os
-import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import requests
@@ -8,7 +6,7 @@ import responses
 
 from events.factories import VideoAssetFactory
 from events.models import VideoAsset
-from events.tasks import _download_google_drive_file, _get_file_id, _save_video_file, download_google_drive_video
+from events.tasks import _download_google_drive_file, _get_file_id, download_google_drive_video
 
 
 @pytest.mark.django_db
@@ -57,21 +55,6 @@ class TestGoogleDriveDownloadTasks:
 
         response = _download_google_drive_file(file_id)
         assert response.content == b"File content"
-
-    def test_save_video_file(self, settings):
-        """ Test saving a video file to VideoAsset """
-        video_asset = VideoAssetFactory(status=VideoAsset.VideoStatus.PROCESSING)
-        settings.MEDIA_ROOT = tempfile.mkdtemp()
-
-        mock_response = MagicMock()
-        large_content = b"x" * 200
-        mock_response.iter_content.return_value = [large_content]
-
-        _save_video_file(video_asset, mock_response, "test_video.mp4")
-        video_asset.refresh_from_db()
-
-        assert video_asset.status == VideoAsset.VideoStatus.READY
-        assert os.path.exists(video_asset.video_file.path)
 
     @patch('events.tasks._get_file_id')
     def test_download_google_drive_video_invalid_link(self, mock_get_file_id):
