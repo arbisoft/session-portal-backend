@@ -7,16 +7,11 @@ on:
     branches:
     - '**'
 
-
 jobs:
-  run_tests:
-    name: tests
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        python-version: ['3.12']
-        toxenv: [quality]
+  lint_and_test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    
     services:
       postgres:
         image: postgres:16
@@ -27,27 +22,37 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd="pg_isready -U testuser -d testdb"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
-    - uses: actions/checkout@v3
-    - name: setup python
-      uses: actions/setup-python@v2
-      with:
-        python-version: ${{ matrix.python-version }}
+    - uses: actions/checkout@v4
 
-    - name: Install Dependencies
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.12
+
+    - name: Install dependencies
       run: |
-        pip install -r requirements/base.txt
+        python -m pip install --upgrade pip
         pip install -r requirements/dev.txt
 
-    - name: Run Tox
-      env:
-        TOXENV: ${{ matrix.toxenv }}
-      run: tox
+    - name: Run Linting
+      run: |
+        tox -e quality
 
-    - name: Run Pytest with Coverage (Console Output with Total)
-      run: pytest --cov=. --cov-report=term
+    - name: Run Tests
+      env:
+        DB_USER: testuser
+        DB_PASSWORD: testpassword
+        DB_NAME: testdb
+        DB_HOST: localhost
+        DB_PORT: 5432
+        DJANGO_PORT: 8000
+        DJANGO_SECRET_KEY: key
+        DJANGO_DEBUG: False
+      run: |
+        pytest --cov=. --cov-report=term
