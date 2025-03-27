@@ -145,3 +145,11 @@ To run linting for the project, use the following command:
 
 ```bash
 docker-compose --profile dev up lint
+```
+
+### Run Tests
+To run test for the project, use the following command:
+
+```bash
+docker-compose --profile dev up test
+```
