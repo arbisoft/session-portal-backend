@@ -1,5 +1,5 @@
+import os
 from .base import *
-
 
 DATABASES = {
     'default': {
@@ -12,6 +12,13 @@ DATABASES = {
     }
 }
 
+
+DEBUG = False
+
+AUTH_PASSWORD_VALIDATORS = []
+
+CELERY_BROKER_URL = 'memory://'
+
 class DisableMigrations:
     def __contains__(self, item):
         return True
@@ -20,3 +27,22 @@ class DisableMigrations:
         return None
 
 MIGRATION_MODULES = DisableMigrations()
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': True,
+    'handlers': {
+        'null': {
+            'class': 'logging.NullHandler',
+        },
+    },
+    'loggers': {
+        '': {
+            'handlers': ['null'],
+            'level': 'CRITICAL',
+        },
+    },
+}
+
+SECRET_KEY = 'test_secret_key_not_for_production'
+ALLOWED_HOSTS = ['*']
