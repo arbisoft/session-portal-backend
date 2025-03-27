@@ -1,6 +1,4 @@
-import os
-import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import requests
@@ -8,7 +6,7 @@ import responses
 
 from events.factories import VideoAssetFactory
 from events.models import VideoAsset
-from events.tasks import _download_google_drive_file, _get_file_id, _save_video_file, download_google_drive_video
+from events.tasks import _download_google_drive_file, _get_file_id, download_google_drive_video
 
 
 @pytest.mark.django_db
