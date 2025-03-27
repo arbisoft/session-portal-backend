@@ -47,13 +47,13 @@ jobs:
 
     - name: Run Tests
       env:
+        # Ensure these match your test settings
+        DJANGO_SETTINGS_MODULE: arbisoft_sessions_portal.settings.test
         DB_USER: testuser
         DB_PASSWORD: testpassword
         DB_NAME: testdb
         DB_HOST: localhost
         DB_PORT: 5432
-        DJANGO_PORT: 8000
-        DJANGO_SECRET_KEY: key
-        DJANGO_DEBUG: False
+        PYTHONPATH: .
       run: |
         pytest --cov=. --cov-report=term
