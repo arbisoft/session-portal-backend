@@ -10,7 +10,12 @@ on:
 jobs:
   lint_and_test:
     name: Lint and Test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ['3.12']
+        toxenv: [quality]
     
     services:
       postgres:
@@ -30,10 +35,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python 3.12
+    - name: Set up Python Version
       uses: actions/setup-python@v4
       with:
-        python-version: 3.12
+        python-version: ${{ matrix.python-version }}
 
     - name: Install dependencies
       run: |
