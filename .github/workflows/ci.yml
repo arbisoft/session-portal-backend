@@ -17,6 +17,20 @@ jobs:
         os: [ubuntu-latest]
         python-version: ['3.12']
         toxenv: [quality]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U testuser -d testdb"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
     steps:
     - uses: actions/checkout@v3
@@ -32,3 +46,6 @@ jobs:
       env:
         TOXENV: ${{ matrix.toxenv }}
       run: tox
+
+    - name: Run Pytest with Coverage (Console Output with Total)
+      run: pytest --cov=. --cov-report=term
