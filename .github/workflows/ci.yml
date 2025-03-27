@@ -42,8 +42,9 @@ jobs:
         pip install -r requirements/dev.txt
 
     - name: Run Linting
-      run: |
-        tox -e quality
+      env:
+        TOXENV: ${{ matrix.toxenv }}
+      run: tox
 
     - name: Run Tests
       run: |
