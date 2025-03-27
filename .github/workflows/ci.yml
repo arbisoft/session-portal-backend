@@ -46,13 +46,5 @@ jobs:
         tox -e quality
 
     - name: Run Tests
-      env:
-        DJANGO_SETTINGS_MODULE: arbisoft_sessions_portal.settings.test
-        DB_USER: testuser
-        DB_PASSWORD: testpassword
-        DB_NAME: testdb
-        DB_HOST: localhost
-        DB_PORT: 5432
-        PYTHONPATH: .
       run: |
-        pytest --cov=. --cov-report=term
+        pytest --cov=. --cov-report=term --cov-fail-under=80
