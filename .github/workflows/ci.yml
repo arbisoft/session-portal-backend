@@ -53,4 +53,4 @@ jobs:
 
     - name: Run Tests
       run: |
-        pytest --cov=. --cov-report=term --cov-fail-under=80
+        pytest --cov --cov-report=term

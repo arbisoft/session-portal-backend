@@ -104,7 +104,7 @@ services:
     container_name: asp-test
     volumes:
       - .:/app
-    command: pytest --cov=. --cov-report=term
+    command: pytest --cov --cov-report=term
     depends_on:
       db:
         condition: service_healthy
