@@ -7,28 +7,50 @@ on:
     branches:
     - '**'
 
-
 jobs:
-  run_tests:
-    name: tests
+  lint_and_test:
+    name: Lint and Test
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest]
         python-version: ['3.12']
         toxenv: [quality]
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
-    - uses: actions/checkout@v3
-    - name: setup python
-      uses: actions/setup-python@v2
+    - uses: actions/checkout@v4
+
+    - name: Set up Python Version
+      uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Install Dependencies
-      run: pip install -r requirements/dev.txt
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements/base.txt
+        pip install -r requirements/dev.txt
 
-    - name: Run Tox
+    - name: Run Linting
       env:
         TOXENV: ${{ matrix.toxenv }}
       run: tox
+
+    - name: Run Tests
+      run: |
+        pytest --cov --cov-report=term
