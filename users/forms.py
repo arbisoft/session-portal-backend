@@ -6,6 +6,12 @@ User = get_user_model()
 
 class CustomUserCreationForm(forms.ModelForm):
     """ Custom user creation form with an optional password """
+
+    username = forms.CharField(required=True)
+    email = forms.EmailField(required=True)
+    first_name = forms.CharField(required=True)
+    last_name = forms.CharField(required=True)
+
     password1 = forms.CharField(
         label="Password", widget=forms.PasswordInput, required=False
     )
