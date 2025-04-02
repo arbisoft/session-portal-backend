@@ -16,6 +16,7 @@ class CustomUserAdmin(UserAdmin):
             "fields": ("username", "email", "first_name", "last_name", "password1", "password2"),
         }),
     )
+    search_fields = ['first_name', 'last_name', 'email']
 
 
 admin.site.unregister(User)

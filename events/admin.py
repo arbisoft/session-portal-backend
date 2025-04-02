@@ -26,6 +26,7 @@ class EventPresenterInline(admin.StackedInline):
     model = EventPresenter
     form = EventPresenterForm
     extra = 1
+    autocomplete_fields = ('user',)
 
 
 class EventAdmin(admin.ModelAdmin):
