@@ -5,7 +5,11 @@ erDiagram
     Event ||--|{ VideoAsset : contains
     Event ||--o{ EventTag : has
     Tag }|--o{ EventTag : contains
-    
+    Event ||--o{ EventPlaylist : has
+    Playlist }|--o{ EventPlaylist : contains
+    Event ||--o{ EventPresenter : has
+    auth_User ||--o{ EventPresenter : presents
+
     %% Todo: Add Workstream Integration tables
     %% Event ||--o| WorkstreamEvent : links_to
     %% WorkstreamEvent ||--|{ WorkstreamComment : has
@@ -30,7 +34,7 @@ erDiagram
         int creator_id FK
         string title
         text description
-        datetime event_date
+        datetime event_time
         string event_type
         string status
         string workstream_id
@@ -43,13 +47,11 @@ erDiagram
         int id PK
         int event_id FK
         string title
-        string s3_key
         string video_file
         integer duration
         string thumbnail
         string status
         integer file_size
-        string content_type
         datetime created_at
         datetime updated_at
     }
@@ -67,6 +69,27 @@ erDiagram
         int event_id FK
         int tag_id FK
         datetime created_at
+    }
+
+    Playlist {
+        int id PK
+        string name
+        string description
+        datetime created_at
+        datetime updated_at
+    }
+
+    EventPlaylist {
+        int id PK
+        int event_id FK
+        int playlist_id FK
+        datetime created_at
+    }
+
+    EventPresenter {
+        int id PK
+        int event_id FK
+        int user_id FK
     }
 
     %% WorkstreamEvent {
