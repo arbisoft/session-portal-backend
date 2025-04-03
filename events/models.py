@@ -1,9 +1,11 @@
 import logging
+import os
 
 import ffmpeg
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.files.base import File
 from django.core.files.storage import FileSystemStorage
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -92,16 +94,41 @@ class VideoAsset(models.Model):
     modified = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
-        """ Override save method to extract file size and duration """
+        """ Override save method to extract file size, duration and thumbnail """
         if self.video_file:
             super().save(*args, **kwargs)
-
             self.file_size = self.video_file.size
             video_path = self.video_file.path
+
             try:
+                # Extract metadata
                 metadata = ffmpeg.probe(video_path)
                 duration = float(metadata['format']['duration'])
                 self.duration = int(duration)  # Convert to seconds
+
+                if not self.thumbnail:
+                    thumbnail_filename = f"{os.path.splitext(os.path.basename(video_path))[0]}_thumb.jpg"
+                    thumbnail_path = os.path.join(os.path.dirname(video_path), thumbnail_filename)
+
+                    # Take a frame at 20% of the video duration for the thumbnail
+                    time_offset = max(1, int(self.duration * 0.2))
+
+                    # Use ffmpeg to extract a frame as the thumbnail
+                    (
+                        ffmpeg
+                        .input(video_path, ss=time_offset)
+                        .output(thumbnail_path, vframes=1)
+                        .overwrite_output()
+                        .run(quiet=True)
+                    )
+
+                    # Save the thumbnail to the model
+                    with open(thumbnail_path, 'rb') as thumb_file:
+                        self.thumbnail.save(thumbnail_filename, File(thumb_file), save=False)
+
+                    # Clean up the temporary file
+                    os.remove(thumbnail_path)
+
             except ffmpeg.Error as e:
                 logger.error("FFmpeg processing error: %s", e.stderr.decode() if hasattr(e, 'stderr') else e)
             except KeyError:
