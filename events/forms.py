@@ -51,15 +51,7 @@ class VideoAssetForm(forms.ModelForm):
 
 
 class EventPresenterForm(forms.ModelForm):
-    """ Custom form to show first_name and last_name in the dropdown """
-    user = forms.ModelChoiceField(
-        queryset=User.objects.all().order_by("first_name", "last_name"),
-        label="Presenter"
-    )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["user"].label_from_instance = lambda obj: f"{obj.first_name} {obj.last_name}"
+    """ Custom form for EventPresenter Model """
 
     class Meta:
         model = EventPresenter
