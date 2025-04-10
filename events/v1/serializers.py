@@ -33,6 +33,7 @@ class EventSerializer(serializers.ModelSerializer):
     publisher = PublisherSerializer(source='creator')
     tags = serializers.SerializerMethodField()
     thumbnail = serializers.SerializerMethodField()
+    video_file = serializers.SerializerMethodField()
     video_duration = serializers.SerializerMethodField()
     presenters = serializers.SerializerMethodField()
     playlists = serializers.SerializerMethodField()
@@ -42,7 +43,8 @@ class EventSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'title', 'description', 'publisher', 'event_time',
             'event_type', 'status', 'is_featured', 'tags',
-            'thumbnail', 'video_duration', 'presenters', 'playlists'
+            'thumbnail', 'video_duration', 'presenters', 'playlists',
+            'video_file'
         )
 
     @staticmethod
@@ -55,6 +57,12 @@ class EventSerializer(serializers.ModelSerializer):
         """ Get thumbnail of an event if available """
         video = event.videos.first()
         return video.thumbnail.url if video and video.thumbnail else ''
+
+    @staticmethod
+    def get_video_file(event):
+        """ Get video file of an event if available """
+        video = event.videos.first()
+        return video.video_file.url if video and video.video_file else ''
 
     @staticmethod
     def get_video_duration(event):
