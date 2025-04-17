@@ -1,5 +1,5 @@
 ---
-name: Build and Push Container Image
+name: Build/Push/Deploy Container Image
 on:
   push:
     branches: 
@@ -33,3 +33,27 @@ jobs:
           target: app
           push: true
           tags: ${{ secrets.CONTAINER_IMAGE_REPO }}/session-portal-backend:${{ github.sha }}, ${{ secrets.CONTAINER_IMAGE_REPO }}/session-portal-backend:latest
+
+      - name: Create Temporary Deployment Token
+        uses: actions/create-github-app-token@v2.0.2
+        id: app-token
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_PRIVATE_KEY }}
+
+      - name: Trigger Backend Deployment
+        uses: actions/github-script@v7.0.1
+        env:
+          OWNER: ${{ secrets.GH_TRIGGER_OWNER }}
+          REPO: ${{ secrets.GH_TRIGGER_REPO }}
+          WORKFLOW_ID: ${{ secrets.GH_TRIGGER_WORKFLOW_ID }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+              await github.rest.actions.createWorkflowDispatch({
+                owner: process.env.OWNER,
+                repo: process.env.REPO,
+                workflow_id: process.env.WORKFLOW_ID,
+                ref: 'master'
+                inputs: { 'backend_version': ${{ github.sha }} }
+              });
