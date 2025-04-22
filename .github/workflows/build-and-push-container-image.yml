@@ -54,6 +54,6 @@ jobs:
                 owner: process.env.OWNER,
                 repo: process.env.REPO,
                 workflow_id: process.env.WORKFLOW_ID,
-                ref: 'master'
-                inputs: { 'backend_version': ${{ github.sha }} }
+                ref: 'master',
+                inputs: { 'backend_version': '${{ github.sha }}' }
               });
