@@ -43,18 +43,14 @@ jobs:
           private-key: ${{ secrets.GH_PRIVATE_KEY }}
 
       - name: Trigger Backend Deployment
-        uses: actions/github-script@v7.0.1
         env:
-          OWNER: ${{ vars.GH_TRIGGER_OWNER }}
-          REPO: ${{ vars.GH_TRIGGER_REPO }}
-          WORKFLOW_ID: ${{ vars.GH_TRIGGER_WORKFLOW_ID }}
-        with:
-          github-token: ${{ steps.app-token.outputs.token }}
-          script: |
-              await github.rest.actions.createWorkflowDispatch({
-                owner: process.env.OWNER,
-                repo: process.env.REPO,
-                workflow_id: process.env.WORKFLOW_ID,
-                ref: 'main',
-                inputs: { 'backend_version': '${{ github.sha }}' }
-              });
+          REPO: ${{ secrets.GH_TRIGGER_REPO }}
+          WORKFLOW_ID: ${{ secrets.GH_TRIGGER_WORKFLOW_ID }}
+        run: |
+          curl -L \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ steps.app-token.outputs.token }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -d '{"ref":"main", "inputs": { "backend_version": "${{ github.sha }}" }}' \
+            https://api.github.com/repos/arbisoft/$REPO/actions/workflows/$WORKFLOW_ID/dispatches
