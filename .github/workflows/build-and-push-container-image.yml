@@ -45,9 +45,9 @@ jobs:
       - name: Trigger Backend Deployment
         uses: actions/github-script@v7.0.1
         env:
-          OWNER: ${{ secrets.GH_TRIGGER_OWNER }}
-          REPO: ${{ secrets.GH_TRIGGER_REPO }}
-          WORKFLOW_ID: ${{ secrets.GH_TRIGGER_WORKFLOW_ID }}
+          OWNER: ${{ vars.GH_TRIGGER_OWNER }}
+          REPO: ${{ vars.GH_TRIGGER_REPO }}
+          WORKFLOW_ID: ${{ vars.GH_TRIGGER_WORKFLOW_ID }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
