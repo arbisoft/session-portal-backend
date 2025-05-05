@@ -26,7 +26,7 @@ thumbnail_storage = FileSystemStorage(
 class Tag(models.Model):
     """ Model to store tags for events """
     name = models.CharField(max_length=100, unique=True)
-    description = models.TextField()
+    description = models.TextField(blank=True)
     created = models.DateTimeField(auto_now_add=True)
     modified = models.DateTimeField(auto_now=True)
 
@@ -37,7 +37,7 @@ class Tag(models.Model):
 class Playlist(models.Model):
     """ Model to store playlists for events """
     name = models.CharField(max_length=100, unique=True)
-    description = models.TextField()
+    description = models.TextField(blank=True)
     created = models.DateTimeField(auto_now_add=True)
     modified = models.DateTimeField(auto_now=True)
 
@@ -66,7 +66,7 @@ class Event(models.Model):
     workstream_id = models.CharField(max_length=100, blank=True, null=True)
     is_featured = models.BooleanField(default=False)
     tags = models.ManyToManyField(Tag, related_name='events')
-    playlists = models.ManyToManyField(Playlist, related_name='events')
+    playlists = models.ManyToManyField(Playlist, related_name='events', blank=True)
     presenters = models.ManyToManyField(User, through='EventPresenter', related_name='events_presented')
     created = models.DateTimeField(auto_now_add=True)
     modified = models.DateTimeField(auto_now=True)
