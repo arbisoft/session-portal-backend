@@ -83,7 +83,7 @@ class VideoAsset(models.Model):
         READY = "READY", _("Ready")
         FAILED = "FAILED", _("Failed")
 
-    event = models.ForeignKey(Event, on_delete=models.DO_NOTHING, related_name='videos')
+    event = models.ForeignKey(Event, on_delete=models.DO_NOTHING, related_name='videos', null=True, blank=True)
     title = models.CharField(max_length=255)
     video_file = models.FileField(storage=video_storage, null=True, blank=True)
     duration = models.IntegerField(default=0)  # in seconds
@@ -101,9 +101,8 @@ class VideoAsset(models.Model):
             video_path = self.video_file.path
 
             try:
-                # Extract metadata
                 metadata = ffmpeg.probe(video_path)
-                duration = float(metadata['format']['duration'])
+                duration = float(metadata['format'].get('duration', 0))
                 self.duration = int(duration)  # Convert to seconds
 
                 if not self.thumbnail:

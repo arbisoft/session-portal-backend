@@ -2,23 +2,30 @@ from django.contrib import admin
 from django.db import models
 from django.forms import Textarea, TextInput
 
-from events.forms import EventPresenterForm, VideoAssetForm
+from events.forms import EventAdminForm, EventPresenterForm, VideoAssetForm
 from events.models import Event, EventPresenter, Playlist, Tag, VideoAsset
+from events.tasks import download_google_drive_video
 
 
-class VideoAssetInline(admin.StackedInline):
-    """ Custom StackedInline admin for VideoAsset """
-
+class VideoAssetAdmin(admin.ModelAdmin):
+    """ Custom Admin for VideoAsset model """
     form = VideoAssetForm
-    model = VideoAsset
-    max_num = 1
-    min_num = 1
-    can_delete = False
+    list_display = ('title', 'event', 'status', 'duration', 'file_size', 'created')
+    list_filter = ('status', 'created', 'event')
+    search_fields = ('title',)
+    autocomplete_fields = ('event',)
     formfield_overrides = {
         models.CharField: {'widget': TextInput(attrs={'style': 'width: 100%'})},
     }
-    # WIP: Automatically detect the file_size and video duration.
-    # readonly_fields = ('file_size', 'duration')
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+
+        google_drive_link = form.cleaned_data.get("google_drive_link")
+        if google_drive_link:
+            download_google_drive_video.delay(obj.id, google_drive_link)
+            obj.status = VideoAsset.VideoStatus.PROCESSING
+            obj.save(update_fields=["status"])
 
 
 class EventPresenterInline(admin.StackedInline):
@@ -31,7 +38,7 @@ class EventPresenterInline(admin.StackedInline):
 
 class EventAdmin(admin.ModelAdmin):
     """ Custom Admin for Event model """
-
+    form = EventAdminForm
     list_display = ('title', 'event_type', 'status', 'event_time', 'creator', 'get_presenters')
     list_filter = ('event_type', 'status', 'event_time')
     search_fields = ('title', 'description')
@@ -40,7 +47,7 @@ class EventAdmin(admin.ModelAdmin):
         models.CharField: {'widget': TextInput(attrs={'style': 'width: 100%'})},
         models.TextField: {'widget': Textarea(attrs={'style': 'width: 100%'})},
     }
-    inlines = [EventPresenterInline, VideoAssetInline]
+    inlines = [EventPresenterInline]
     autocomplete_fields = ('creator', )
     ordering = ('event_time', 'title', 'status')
     list_editable = ('status', )
@@ -49,7 +56,7 @@ class EventAdmin(admin.ModelAdmin):
         (None, {
             'fields': ('creator', 'title', 'description', 'event_time',
                        'event_type', 'status', 'is_featured',
-                       'tags', 'playlists')
+                       'tags', 'playlists', 'videoasset')
         }),
     )
 
@@ -63,7 +70,20 @@ class EventAdmin(admin.ModelAdmin):
 
     get_presenters.short_description = "Presenters"
 
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+
+        # Handle assignment here after Event has a valid PK
+        videoasset = form.cleaned_data.get("videoasset")
+        if videoasset:
+            # Unlink any previous link first
+            VideoAsset.objects.filter(event=obj).exclude(id=videoasset.id).update(event=None)
+
+            videoasset.event = obj
+            videoasset.save(update_fields=["event"])
+
 
 admin.site.register(Event, EventAdmin)
 admin.site.register(Playlist)
 admin.site.register(Tag)
+admin.site.register(VideoAsset, VideoAssetAdmin)

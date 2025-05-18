@@ -63,8 +63,8 @@ class TestGoogleDriveDownloadTasks:
 
         mock_get_file_id.return_value = None
 
-        with pytest.raises(ValueError, match="Invalid Google Drive link: https://invalid.link"):
-            download_google_drive_video(video_asset.id, "https://invalid.link")
+        result = download_google_drive_video(video_asset.id, "https://invalid.link")
+        assert result is False
 
     @patch('events.tasks._get_file_id')
     @patch('events.tasks._download_google_drive_file')
