@@ -40,19 +40,33 @@ class TestEventsAPI:
         assert response.data["title"] == video_asset.title
         assert response.data["status"] == VideoAsset.VideoStatus.READY
 
-    def test_list_playlists(self, api_client):
-        """ Test listing all playlists """
-        PlaylistFactory.create_batch(2)
-        response = api_client.get(reverse("playlist-list"))
-        assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) == 2
+    def test_event_playlist_list(self, api_client):
+        """ Test that only playlists linked to events are returned """
+        linked_playlist = PlaylistFactory(name="Used Playlist")
+        unused_playlist = PlaylistFactory(name="Unused Playlist")
 
-    def test_list_tags(self, api_client):
-        """ Test listing all tags """
-        TagFactory.create_batch(4)
-        response = api_client.get(reverse("tag-list"))
+        event = EventFactory()
+        event.playlists.add(linked_playlist)
+
+        response = api_client.get(reverse("event-playlist-list"))
+
         assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) == 4
+        assert len(response.data) == 1
+        assert response.data[0]["name"] == "Used Playlist"
+
+    def test_event_tag_list(self, api_client):
+        """ Test that only tags linked to events are returned """
+        used_tag = TagFactory(name="Used Tag")
+        unused_tag = TagFactory(name="Unused Tag")
+
+        event = EventFactory()
+        event.tags.add(used_tag)
+
+        response = api_client.get(reverse("event-tag-list"))  # adjust to actual route name
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]["name"] == "Used Tag"
 
     def test_event_recommendations(self, api_client):
         """ Test retrieving event recommendations """

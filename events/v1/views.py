@@ -34,16 +34,16 @@ class VideoAssetDetailView(RetrieveAPIView):
         return obj
 
 
-class TagListView(ListAPIView):
-    """ View for listing all tags """
+class EventTagListView(ListAPIView):
+    """ View for listing tags hat are linked to events """
 
     queryset = Tag.objects.filter(events__isnull=False).distinct()
     serializer_class = TagListSerializer
     pagination_class = None
 
 
-class PlaylistListView(ListAPIView):
-    """ View for listing all playlists """
+class EventPlaylistListView(ListAPIView):
+    """ View for listing playlists that are linked to events """
 
     queryset = Playlist.objects.filter(events__isnull=False).distinct()
     serializer_class = PlaylistListSerializer
