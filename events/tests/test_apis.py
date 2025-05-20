@@ -27,10 +27,33 @@ class TestEventsAPI:
 
     def test_list_events(self, api_client):
         """ Test listing all events """
-        EventFactory.create_batch(3)
+        events = [EventFactory() for _ in range(3)]
+        for event in events:
+            VideoAssetFactory(event=event)
         response = api_client.get(reverse("events-list"))
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data["results"]) == 3
+
+    def test_list_events_with_and_without_videoasset(self, api_client):
+        """ Test that /events/all returns only events with linked VideoAssets """
+
+        # Create 2 events without video assets
+        EventFactory.create_batch(2)
+
+        # Create 3 events and attach video assets
+        events_with_video = [EventFactory() for _ in range(3)]
+        for event in events_with_video:
+            VideoAssetFactory(event=event)
+
+        response = api_client.get(reverse("events-list"))  # Replace with actual route name if different
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data["results"]) == 3
+
+        returned_ids = {e["id"] for e in response.data["results"]}
+        expected_ids = {e.id for e in events_with_video}
+
+        assert returned_ids == expected_ids, "Only events with VideoAssets should be returned"
 
     def test_video_asset_detail(self, api_client):
         """ Test retrieving a video asset detail """
