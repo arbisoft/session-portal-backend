@@ -1,16 +1,12 @@
 import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
+
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
-from events.factories import (
-    EventFactory,
-    PlaylistFactory,
-    TagFactory,
-    UserFactory,
-    VideoAssetFactory
-)
+# pylint: disable=duplicate-code
+from events.factories import EventFactory, PlaylistFactory, TagFactory, UserFactory, VideoAssetFactory
 
 User = get_user_model()
 
