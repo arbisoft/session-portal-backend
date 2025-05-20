@@ -3,8 +3,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.forms import TextInput
 
-from events.models import EventPresenter, VideoAsset
-from events.tasks import download_google_drive_video
+from events.models import Event, EventPresenter, VideoAsset
 
 User = get_user_model()
 
@@ -22,7 +21,7 @@ class VideoAssetForm(forms.ModelForm):
 
     class Meta:
         model = VideoAsset
-        fields = ('title', 'video_file', 'thumbnail')
+        fields = ('title', 'video_file', 'thumbnail',)
 
     def clean(self):
         """ Infer, save and clean the data related to videoasset """
@@ -38,16 +37,36 @@ class VideoAssetForm(forms.ModelForm):
 
         return cleaned_data
 
-    def save(self, commit=True):
-        google_drive_link = self.cleaned_data.get('google_drive_link')
-        video_asset = super().save()
 
-        if google_drive_link:
-            download_google_drive_video.delay(video_asset.id, google_drive_link)
-            video_asset.status = VideoAsset.VideoStatus.PROCESSING
-            video_asset.save()
+class EventAdminForm(forms.ModelForm):
+    """ Custom form for Event Model """
+    videoasset = forms.ModelChoiceField(
+        queryset=VideoAsset.objects.none(),
+        required=False,
+        label="Video Asset",
+        help_text="Select a video to associate with this event."
+    )
 
-        return video_asset
+    class Meta:
+        model = Event
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        current_event = self.instance
+        qs = VideoAsset.objects.filter(event__isnull=True)
+
+        if current_event.pk:
+            qs = qs | VideoAsset.objects.filter(event=current_event)
+
+        self.fields["videoasset"].queryset = qs.distinct()
+
+        # This ensures the current value is selected
+        self.initial["videoasset"] = (
+            VideoAsset.objects.filter(event=current_event).first()
+            if current_event.pk else None
+        )
 
 
 class EventPresenterForm(forms.ModelForm):

@@ -96,6 +96,9 @@ def download_google_drive_video(video_asset_id, drive_link):
         print(f"VideoAsset {video_asset_id} does not exist")
     except requests.exceptions.RequestException as e:
         print(f"Error downloading file: {e}")
+    except ValueError as e:
+        print(f"Error processing file: {e}")
 
+    print(f"Failed to process VideoAsset ID: {video_asset_id}")
     VideoAsset.objects.filter(id=video_asset_id).update(status=VideoAsset.VideoStatus.FAILED)
     return False
