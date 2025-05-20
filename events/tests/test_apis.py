@@ -62,7 +62,7 @@ class TestEventsAPI:
         event = EventFactory()
         event.tags.add(used_tag)
 
-        response = api_client.get(reverse("event-tag-list"))  # adjust to actual route name
+        response = api_client.get(reverse("event-tag-list"))
 
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data) == 1
