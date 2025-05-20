@@ -37,7 +37,7 @@ class VideoAssetDetailView(RetrieveAPIView):
 class TagListView(ListAPIView):
     """ View for listing all tags """
 
-    queryset = Tag.objects.all()
+    queryset = Tag.objects.filter(events__isnull=False).distinct()
     serializer_class = TagListSerializer
     pagination_class = None
 
@@ -45,7 +45,7 @@ class TagListView(ListAPIView):
 class PlaylistListView(ListAPIView):
     """ View for listing all playlists """
 
-    queryset = Playlist.objects.all()
+    queryset = Playlist.objects.filter(events__isnull=False).distinct()
     serializer_class = PlaylistListSerializer
     pagination_class = None
 
