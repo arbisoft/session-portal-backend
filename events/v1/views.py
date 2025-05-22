@@ -35,7 +35,7 @@ class VideoAssetDetailView(RetrieveAPIView):
 
 
 class TagListView(ListAPIView):
-    """ View for listing the tags """
+    """ View for listing all tags """
 
     queryset = Tag.objects.all()
     serializer_class = TagListSerializer
@@ -44,7 +44,7 @@ class TagListView(ListAPIView):
 
 
 class PlaylistListView(ListAPIView):
-    """ View for listing the playlists """
+    """ View for listing all playlists """
 
     queryset = Playlist.objects.all()
     serializer_class = PlaylistListSerializer

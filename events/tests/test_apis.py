@@ -40,8 +40,8 @@ class TestEventsAPI:
         assert response.data["title"] == video_asset.title
         assert response.data["status"] == VideoAsset.VideoStatus.READY
 
-    def test_playlist_list(self, api_client):
-        """ Test that only playlists linked to events are returned """
+    def test_list_playlists(self, api_client):
+        """ Test listing all playlists """
         linked_playlist = PlaylistFactory(name="Used Playlist")
         unused_playlist = PlaylistFactory(name="Unused Playlist")
 
@@ -57,8 +57,8 @@ class TestEventsAPI:
         assert len(response.data) == 1
         assert response.data[0]["name"] == "Used Playlist"
 
-    def test_event_tag_list(self, api_client):
-        """ Test that only tags linked to events are returned """
+    def test_list_tags(self, api_client):
+        """ Test listing all tags """
         used_tag = TagFactory(name="Used Tag")
         unused_tag = TagFactory(name="Unused Tag")
 
