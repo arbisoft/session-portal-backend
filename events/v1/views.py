@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
 
 from events.models import Event, Playlist, Tag, VideoAsset
-from events.v1.filters import EventFilter
+from events.v1.filters import EventFilter, PlaylistFilter, TagFilter
 from events.v1.pagination import CustomPageNumberPagination
 from events.v1.serializers import EventSerializer, PlaylistListSerializer, TagListSerializer, VideoAssetSerializer
 from events.v1.utils import get_similar_events
@@ -34,20 +34,22 @@ class VideoAssetDetailView(RetrieveAPIView):
         return obj
 
 
-class EventTagListView(ListAPIView):
-    """ View for listing tags hat are linked to events """
+class TagListView(ListAPIView):
+    """ View for listing the tags """
 
-    queryset = Tag.objects.filter(events__isnull=False).distinct()
+    queryset = Tag.objects.all()
     serializer_class = TagListSerializer
     pagination_class = None
+    filterset_class = TagFilter
 
 
-class EventPlaylistListView(ListAPIView):
-    """ View for listing playlists that are linked to events """
+class PlaylistListView(ListAPIView):
+    """ View for listing the playlists """
 
-    queryset = Playlist.objects.filter(events__isnull=False).distinct()
+    queryset = Playlist.objects.all()
     serializer_class = PlaylistListSerializer
     pagination_class = None
+    filterset_class = PlaylistFilter
 
 
 class EventRecommendationsView(APIView):

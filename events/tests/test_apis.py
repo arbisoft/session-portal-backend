@@ -40,7 +40,7 @@ class TestEventsAPI:
         assert response.data["title"] == video_asset.title
         assert response.data["status"] == VideoAsset.VideoStatus.READY
 
-    def test_event_playlist_list(self, api_client):
+    def test_playlist_list(self, api_client):
         """ Test that only playlists linked to events are returned """
         linked_playlist = PlaylistFactory(name="Used Playlist")
         unused_playlist = PlaylistFactory(name="Unused Playlist")
@@ -48,8 +48,11 @@ class TestEventsAPI:
         event = EventFactory()
         event.playlists.add(linked_playlist)
 
-        response = api_client.get(reverse("event-playlist-list"))
+        response = api_client.get(reverse("playlist-list"))
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 2
 
+        response = api_client.get(reverse("playlist-list"), {'linked_to_events': True})
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data) == 1
         assert response.data[0]["name"] == "Used Playlist"
@@ -62,8 +65,11 @@ class TestEventsAPI:
         event = EventFactory()
         event.tags.add(used_tag)
 
-        response = api_client.get(reverse("event-tag-list"))
+        response = api_client.get(reverse("tag-list"))
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 2
 
+        response = api_client.get(reverse("tag-list"), {'linked_to_events': True})
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data) == 1
         assert response.data[0]["name"] == "Used Tag"
