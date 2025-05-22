@@ -2,7 +2,7 @@ import django_filters
 
 from django.db.models import Q
 
-from events.models import Event
+from events.models import Event, Playlist, Tag
 
 
 class EventFilter(django_filters.rest_framework.FilterSet):
@@ -38,3 +38,35 @@ class EventFilter(django_filters.rest_framework.FilterSet):
         return queryset.filter(
             playlists__name=value
         )
+
+
+class TagFilter(django_filters.rest_framework.FilterSet):
+    """ Filter for the Tag model """
+
+    linked_to_events = django_filters.BooleanFilter(method='filter_linked_to_events')
+
+    class Meta:
+        model = Tag
+        fields = ['linked_to_events']
+
+    def filter_linked_to_events(self, queryset, _, value):
+        """ Filter the queryset based on the linked_to_events value """
+        if value:
+            return queryset.filter(events__isnull=False).distinct()
+        return queryset
+
+
+class PlaylistFilter(django_filters.rest_framework.FilterSet):
+    """ Filter for the Playlist model """
+
+    linked_to_events = django_filters.BooleanFilter(method='filter_linked_to_events')
+
+    class Meta:
+        model = Playlist
+        fields = ['linked_to_events']
+
+    def filter_linked_to_events(self, queryset, _, value):
+        """ Filter the queryset based on the linked_to_events value """
+        if value:
+            return queryset.filter(events__isnull=False).distinct()
+        return queryset
