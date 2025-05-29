@@ -65,7 +65,7 @@ class Event(models.Model):
     status = models.CharField(max_length=20, choices=EventStatus.choices, default=EventStatus.DRAFT)
     workstream_id = models.CharField(max_length=100, blank=True, null=True)
     is_featured = models.BooleanField(default=False)
-    tags = models.ManyToManyField(Tag, related_name='events')
+    tags = models.ManyToManyField(Tag, related_name='events', blank=True)
     playlists = models.ManyToManyField(Playlist, related_name='events', blank=True)
     presenters = models.ManyToManyField(User, through='EventPresenter', related_name='events_presented')
     created = models.DateTimeField(auto_now_add=True)

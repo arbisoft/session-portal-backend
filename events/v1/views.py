@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
 
 from events.models import Event, Playlist, Tag, VideoAsset
-from events.v1.filters import EventFilter
+from events.v1.filters import EventFilter, PlaylistFilter, TagFilter
 from events.v1.pagination import CustomPageNumberPagination
 from events.v1.serializers import EventSerializer, PlaylistListSerializer, TagListSerializer, VideoAssetSerializer
 from events.v1.utils import get_similar_events
@@ -40,6 +40,7 @@ class TagListView(ListAPIView):
     queryset = Tag.objects.all()
     serializer_class = TagListSerializer
     pagination_class = None
+    filterset_class = TagFilter
 
 
 class PlaylistListView(ListAPIView):
@@ -48,6 +49,7 @@ class PlaylistListView(ListAPIView):
     queryset = Playlist.objects.all()
     serializer_class = PlaylistListSerializer
     pagination_class = None
+    filterset_class = PlaylistFilter
 
 
 class EventRecommendationsView(APIView):
