@@ -11,7 +11,6 @@ class VideoAssetAdmin(admin.ModelAdmin):
     """ Custom Admin for VideoAsset model """
     form = VideoAssetForm
     list_display = ('title', 'event', 'status', 'duration', 'file_size', 'created')
-    list_filter = ('status', 'created', 'event')
     search_fields = ('title',)
     autocomplete_fields = ('event',)
     formfield_overrides = {
@@ -40,7 +39,6 @@ class EventAdmin(admin.ModelAdmin):
     """ Custom Admin for Event model """
     form = EventAdminForm
     list_display = ('title', 'event_type', 'status', 'event_time', 'creator', 'get_presenters')
-    list_filter = ('event_type', 'status', 'event_time')
     search_fields = ('title', 'description')
     filter_horizontal = ('tags', 'playlists')
     formfield_overrides = {
