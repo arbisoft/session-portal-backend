@@ -137,6 +137,32 @@ class VideoAsset(models.Model):
 
         super().save(*args, **kwargs)
 
+    def file_size_mb(self):
+        """
+        Returns the file size in MB, formatted to two decimal places.
+        """
+        if self.file_size is None:
+            return ""
+        return f"{self.file_size / (1024 * 1024):.2f}"
+
+    file_size_mb.short_description = "File Size (MB)"
+
+    def duration_hh_mm_ss(self):
+        """
+        Converts duration in seconds to hh:mm:ss format.
+        """
+        if self.duration is None:
+            return ""
+
+        seconds = int(self.duration)
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        remaining_seconds = seconds % 60
+
+        return f"{hours:02d}:{minutes:02d}:{remaining_seconds:02d}"
+
+    duration_hh_mm_ss.short_description = "Duration"
+
     def __str__(self):
         return self.title
 

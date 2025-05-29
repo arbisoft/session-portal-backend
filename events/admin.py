@@ -10,7 +10,7 @@ from events.tasks import download_google_drive_video
 class VideoAssetAdmin(admin.ModelAdmin):
     """ Custom Admin for VideoAsset model """
     form = VideoAssetForm
-    list_display = ('title', 'event', 'status', 'duration', 'file_size', 'created')
+    list_display = ('title', 'event', 'status', 'duration_hh_mm_ss', 'file_size_mb', 'created')
     list_filter = ('status', 'created', 'event')
     search_fields = ('title',)
     autocomplete_fields = ('event',)
