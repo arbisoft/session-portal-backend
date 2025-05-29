@@ -65,17 +65,37 @@ class TestEventsAPI:
 
     def test_list_playlists(self, api_client):
         """ Test listing all playlists """
-        PlaylistFactory.create_batch(2)
+        linked_playlist = PlaylistFactory(name="Used Playlist")
+        unused_playlist = PlaylistFactory(name="Unused Playlist")
+
+        event = EventFactory()
+        event.playlists.add(linked_playlist)
+
         response = api_client.get(reverse("playlist-list"))
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data) == 2
 
+        response = api_client.get(reverse("playlist-list"), {'linked_to_events': True})
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]["name"] == "Used Playlist"
+
     def test_list_tags(self, api_client):
         """ Test listing all tags """
-        TagFactory.create_batch(4)
+        used_tag = TagFactory(name="Used Tag")
+        unused_tag = TagFactory(name="Unused Tag")
+
+        event = EventFactory()
+        event.tags.add(used_tag)
+
         response = api_client.get(reverse("tag-list"))
         assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) == 4
+        assert len(response.data) == 2
+
+        response = api_client.get(reverse("tag-list"), {'linked_to_events': True})
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]["name"] == "Used Tag"
 
     def test_event_recommendations(self, api_client):
         """ Test retrieving event recommendations """
