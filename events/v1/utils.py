@@ -1,21 +1,30 @@
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 
 from events.models import Event
 
 
-def get_similar_events(event_id):
+def get_similar_events(event_id: int) -> list[Event]:
     """
-    Get similar events based on the same playlist, presenter, or tags.
-    Returns events in order of similarity priority.
+    Retrieve similar events based on playlists, presenters, and tags.
+    Excludes the current event and returns a maximum of 5 latest events.
     """
     event = get_object_or_404(Event, id=event_id)
+    exclude_current = ~Q(id=event.id)
+    similarity_query = Q()
 
-    similar_events = Event.objects.filter(playlists__in=event.playlists.all()).exclude(id=event.id).distinct()
+    if event.playlists.exists():
+        similarity_query |= Q(playlists__in=event.playlists.all())
+    if event.presenters.exists():
+        similarity_query |= Q(presenters__in=event.presenters.all())
+    if event.tags.exists():
+        similarity_query |= Q(tags__in=event.tags.all())
 
-    if not similar_events.exists():
-        similar_events = Event.objects.filter(presenters__in=event.presenters.all()).exclude(id=event.id).distinct()
+    similar_events = Event.objects.filter(exclude_current & similarity_query).distinct()
+    latest_events = Event.objects.filter(exclude_current).order_by('-event_time')[:5]
 
-    if not similar_events.exists():
-        similar_events = Event.objects.filter(tags__in=event.tags.all()).exclude(id=event.id).distinct()
+    combined_events = list(similar_events) + list(latest_events)
+    unique_events = {event.id: event for event in combined_events}.values()
+    results = sorted(unique_events, key=lambda e: e.event_time, reverse=True)
 
-    return similar_events
+    return results
