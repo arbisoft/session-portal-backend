@@ -18,7 +18,7 @@ PyJWT==2.9.0
 redis==5.2.1
 requests==2.32.3
 responses==0.25.7
-setuptools==75.1.0
+setuptools==78.1.1
 sqlparse==0.5.1
 urllib3==2.2.3
 wheel==0.44.0
