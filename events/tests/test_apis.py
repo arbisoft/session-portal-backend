@@ -99,7 +99,32 @@ class TestEventsAPI:
 
     def test_event_recommendations(self, api_client):
         """ Test retrieving event recommendations """
+        playlist = PlaylistFactory()
+        tag = TagFactory()
+        presenter = UserFactory()
         event = EventFactory()
+        event.playlists.add(playlist)
+        event.tags.add(tag)
+        event.presenters.add(presenter)
+        event.save()
+
+        # Create one similar event (shares playlist)
+        similar_event = EventFactory()
+        similar_event.playlists.add(playlist)
+        similar_event.save()
+
+        # Create other events with different playlists
+        for _ in range(10):
+            other_playlist = PlaylistFactory()
+            unrelated_event = EventFactory()
+            unrelated_event.playlists.add(other_playlist)
+            unrelated_event.save()
+
         response = api_client.get(reverse("recommendation", args=[event.id]))
         assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) == 0
+
+        returned_ids = {e["id"] for e in response.data}
+        assert similar_event.id in returned_ids
+        assert event.id not in returned_ids
+        # Similar events + 5 latest events
+        assert len(response.data) == 6
