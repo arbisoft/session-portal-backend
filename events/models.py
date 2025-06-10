@@ -59,6 +59,7 @@ class Event(models.Model):
 
     creator = models.ForeignKey(User, on_delete=models.DO_NOTHING, related_name='events')
     title = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=255, blank=True, null=True)
     description = models.TextField()
     event_time = models.DateTimeField()
     event_type = models.CharField(max_length=20, choices=EventType.choices, default=EventType.SESSION)

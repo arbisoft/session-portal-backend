@@ -53,8 +53,16 @@ class EventAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
         current_event = self.instance
+
+        # Disable slug field if the instance is new
+        if current_event and current_event.pk:
+            self.fields['slug'].disabled = False
+        else:
+            self.fields['slug'].disabled = True
+
+        # Populate videoasset queryset based on the current event
+        # If the event is new, show all video assets without an event
         qs = VideoAsset.objects.filter(event__isnull=True)
 
         if current_event.pk:
