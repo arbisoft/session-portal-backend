@@ -15,7 +15,7 @@ from events.v1.utils import get_similar_events
 class EventsListView(ListAPIView):
     """ View for listing the events """
 
-    queryset = Event.objects.filter(videos__isnull=False).order_by("-status")
+    queryset = Event.objects.filter(videos__isnull=False)
     serializer_class = EventSerializer
     pagination_class = CustomPageNumberPagination
     filterset_class = EventFilter

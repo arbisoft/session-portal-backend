@@ -4,7 +4,7 @@ from faker import Faker
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from events.models import Event, Playlist, Tag, VideoAsset
+from events.models import Event, EventPresenter, Playlist, Tag, VideoAsset
 
 fake = Faker()
 User = get_user_model()
@@ -61,3 +61,13 @@ class VideoAssetFactory(factory.django.DjangoModelFactory):
     status = VideoAsset.VideoStatus.READY
     duration = factory.Faker("random_int", min=60, max=3600)  # Duration in seconds
     file_size = factory.Faker("random_int", min=1024, max=10485760)  # File size in bytes
+
+
+class EventPresenterFactory(factory.django.DjangoModelFactory):
+    """Factory for EventPresenter model"""
+
+    class Meta:
+        model = EventPresenter
+
+    event = factory.SubFactory(EventFactory)
+    user = factory.SubFactory(UserFactory)
