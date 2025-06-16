@@ -6,7 +6,7 @@ from events.models import Event
 
 
 @receiver(post_save, sender=Event)
-def set_slug_on_create(_sender, instance, created, **kwargs):
+def set_slug_on_create(sender, instance, created, **kwargs):  # pylint: disable=unused-argument
     """
     Set a slug for the event instance if it is created and does not have a slug.
     The slug is generated from the title and includes the event ID to ensure uniqueness.
