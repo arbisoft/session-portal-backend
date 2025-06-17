@@ -52,9 +52,9 @@ class EventAdmin(admin.ModelAdmin):
 
     fieldsets = (
         (None, {
-            'fields': ('creator', 'title', 'description', 'event_time',
+            'fields': ('creator', 'title', 'slug', 'description', 'event_time',
                        'event_type', 'status', 'is_featured',
-                       'tags', 'playlists', 'videoasset')
+                       'tags', 'playlists', 'videoasset',)
         }),
     )
 
