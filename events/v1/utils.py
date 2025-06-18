@@ -4,12 +4,12 @@ from django.shortcuts import get_object_or_404
 from events.models import Event
 
 
-def get_similar_events(event_id: int) -> list[Event]:
+def get_similar_events(event_slug: str) -> list[Event]:
     """
     Retrieve similar events based on playlists, presenters, and tags.
     Excludes the current event and returns a maximum of 5 latest events.
     """
-    event = get_object_or_404(Event, id=event_id)
+    event = get_object_or_404(Event, slug=event_slug)
     exclude_current = ~Q(id=event.id)
     similarity_query = Q()
 
