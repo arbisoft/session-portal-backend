@@ -29,7 +29,7 @@ class VideoAssetDetailView(RetrieveAPIView):
     def get_object(self):
         obj = get_object_or_404(
             VideoAsset.objects.select_related('event__creator').prefetch_related('event__tags', 'event__playlists'),
-            event_id=self.kwargs["pk"]
+            event__slug=self.kwargs["event_slug"]
             )
         return obj
 
@@ -55,8 +55,8 @@ class PlaylistListView(ListAPIView):
 class EventRecommendationsView(APIView):
     """ View for listing similar events """
 
-    def get(self, request, event_id, *args, **kwargs):
+    def get(self, request, event_slug, *args, **kwargs):
         """ Get similar events based on the same playlist, presenter or tags """
-        similar_events = get_similar_events(event_id)
+        similar_events = get_similar_events(event_slug)
         serializer = EventSerializer(similar_events, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
