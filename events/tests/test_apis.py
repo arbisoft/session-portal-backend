@@ -58,7 +58,7 @@ class TestEventsAPI:
     def test_video_asset_detail(self, api_client):
         """ Test retrieving a video asset detail """
         video_asset = VideoAssetFactory()
-        response = api_client.get(reverse("video-asset-detail", args=[video_asset.event.id]))
+        response = api_client.get(reverse("video-asset-detail", args=[video_asset.event.slug]))
         assert response.status_code == status.HTTP_200_OK
         assert response.data["title"] == video_asset.title
         assert response.data["status"] == VideoAsset.VideoStatus.READY
@@ -120,7 +120,7 @@ class TestEventsAPI:
             unrelated_event.playlists.add(other_playlist)
             unrelated_event.save()
 
-        response = api_client.get(reverse("recommendation", args=[event.id]))
+        response = api_client.get(reverse("recommendation", args=[event.slug]))
         assert response.status_code == status.HTTP_200_OK
 
         returned_ids = {e["id"] for e in response.data}

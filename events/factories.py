@@ -3,6 +3,7 @@ from faker import Faker
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from django.utils.text import slugify
 
 from events.models import Event, EventPresenter, Playlist, Tag, VideoAsset
 
@@ -28,6 +29,7 @@ class EventFactory(factory.django.DjangoModelFactory):
 
     creator = factory.SubFactory(UserFactory)
     title = factory.Faker("sentence", nb_words=4)
+    slug = factory.LazyAttribute(lambda obj: slugify(obj.title))
     description = factory.Faker("paragraph")
     event_time = factory.LazyFunction(lambda: timezone.now() + timezone.timedelta(days=30))
     event_type = Event.EventType.SESSION
