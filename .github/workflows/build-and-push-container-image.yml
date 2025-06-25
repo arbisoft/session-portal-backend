@@ -1,9 +1,8 @@
 ---
 name: Build/Push/Deploy Container Image
 on:
-  push:
-    branches: 
-      - main
+  release:
+    types: [published]
   workflow_dispatch:
 
 jobs:
@@ -33,7 +32,7 @@ jobs:
             GID=${{ secrets.APP_USER_GID }}
           target: app
           push: true
-          tags: ${{ secrets.CONTAINER_IMAGE_REPO }}/session-portal-backend:${{ github.sha }}, ${{ secrets.CONTAINER_IMAGE_REPO }}/session-portal-backend:latest
+          tags: ${{ secrets.CONTAINER_IMAGE_REPO }}/session-portal-backend:${{ github.ref_name }}, ${{ secrets.CONTAINER_IMAGE_REPO }}/session-portal-backend:latest
 
       - name: Create Temporary Deployment Token
         uses: actions/create-github-app-token@v2.0.6
@@ -59,5 +58,5 @@ jobs:
                 repo: process.env.REPO,
                 workflow_id: process.env.WORKFLOW_ID,
                 ref: 'main',
-                inputs: { 'backend_version': '${{ github.sha }}' }
+                inputs: { 'backend_version': '${{ github.ref_name }}' }
               });
