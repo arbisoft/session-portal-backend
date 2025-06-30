@@ -122,9 +122,9 @@ class TestEventsAPI:
 
         response = api_client.get(reverse("recommendation", args=[event.slug]))
         assert response.status_code == status.HTTP_200_OK
-
-        returned_ids = {e["id"] for e in response.data}
+        results = response.data["results"]
+        returned_ids = {e["id"] for e in results}
         assert similar_event.id in returned_ids
         assert event.id not in returned_ids
         # Similar events + 5 latest events
-        assert len(response.data) == 6
+        assert len(results) == 6

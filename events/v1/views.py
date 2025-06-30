@@ -1,6 +1,4 @@
-from rest_framework import status
 from rest_framework.generics import ListAPIView, RetrieveAPIView
-from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from django.shortcuts import get_object_or_404
@@ -54,9 +52,14 @@ class PlaylistListView(ListAPIView):
 
 class EventRecommendationsView(APIView):
     """ View for listing similar events """
+    pagination_class = CustomPageNumberPagination
 
     def get(self, request, event_slug, *args, **kwargs):
         """ Get similar events based on the same playlist, presenter or tags """
         similar_events = get_similar_events(event_slug)
-        serializer = EventSerializer(similar_events, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+
+        paginator = self.pagination_class()
+        paginated_events = paginator.paginate_queryset(similar_events, request, view=self)
+
+        serializer = EventSerializer(paginated_events, many=True)
+        return paginator.get_paginated_response(serializer.data)
