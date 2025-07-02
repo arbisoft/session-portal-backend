@@ -194,6 +194,12 @@ class TestEventFilters:
         assert len(response.data["results"]) == 1
         assert response.data["results"][0]["title"] == "Python Workshop"
 
+        response = api_client.get(reverse("events-list"), {'search': 'Bob Wilson'})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data["results"]) == 1
+        assert response.data["results"][0]["title"] == "Data Science Talk"
+
     def test_events_search_multiple_presenters(self, api_client):
         """ Test event with multiple presenters """
         presenter1 = UserFactory(first_name="Alice", last_name="Johnson")

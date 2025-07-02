@@ -1,7 +1,8 @@
 import django_filters
 
 from django.contrib.postgres.search import TrigramSimilarity
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef, Q, Value
+from django.db.models.functions import Concat
 
 from events.models import Event, EventPresenter, Playlist, Tag
 
@@ -49,9 +50,10 @@ class EventFilter(django_filters.rest_framework.FilterSet):
 
         presenter_match = EventPresenter.objects.filter(
             event=OuterRef('pk')
+        ).annotate(
+            full_name=Concat('user__first_name', Value(' '), 'user__last_name')
         ).filter(
-            Q(user__first_name__icontains=search_term) |
-            Q(user__last_name__icontains=search_term)
+            full_name__icontains=search_term
         )
 
         queryset = queryset.annotate(
