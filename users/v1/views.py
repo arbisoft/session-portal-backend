@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
 
 from arbisoft_sessions_portal.services.google.google_user_info import GoogleUserInfoService
 from users.v1.serializers import LoginUserSerializer
@@ -110,16 +110,106 @@ class LoginUserView(APIView):
             }
         })
 
+class LoginWithEmailView(APIView):
+    """ View for logging in the user with email """
 
-class HelloWorldView(APIView):
-    """ View for testing the API """
-
+    permission_classes = []
+    
     @extend_schema(
-        responses={200: {"type": "string", "example": "Hello World"}}
+        request={
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "format": "email",
+                    "description": "User email address",
+                    "example": "user@example.com"
+                },
+                "password": {
+                    "type": "string",
+                    "format": "password",
+                    "description": "User password",
+                    "example": "securepassword123"
+                }
+            },
+            "required": ["email", "password"]
+        },
+        responses={
+            200: {
+                "type": "object",
+                "properties": {
+                    "refresh": {
+                        "type": "string",
+                        "description": "JWT refresh token",
+                        "example": "eyJ0eXAiOiJKV1QiLCJhbGc..."
+                    },
+                    "access": {
+                        "type": "string",
+                        "description": "JWT access token",
+                        "example": "eyJ0eXAiOiJKV1QiLCJhbGc..."
+                    },
+                    "user_info": {
+                        "type": "object",
+                        "properties": {
+                            "full_name": {
+                                "type": "string",
+                                "example": "John Doe"
+                            },
+                            "first_name": {
+                                "type": "string",
+                                "example": "John"
+                            },
+                            "last_name": {
+                                "type": "string",
+                                "example": "Doe"
+                            },
+                            "avatar": {
+                                "type": ["string", "null"],
+                                "format": "uri",
+                                "example": None,
+                                "description": "User avatar URL, can be null"
+                            }
+                        }
+                    }
+                }
+            },
+            400: {
+                "type": "object",
+                "properties": {
+                    "detail": {
+                        "type": "string",
+                        "enum": [
+                            "Email and password are required",
+                            "Invalid email or password"
+                        ]
+                    }
+                }
+            }
+        },
+        description="Authenticate user using email and password and return JWT tokens",
     )
-    def get(self, request):
-        """
-        This endpoint returns a simple "Hello World" response.
-        It can be used to verify that the API is up and running.
-        """
-        return Response("Hello World")
+    def post(self, request):
+        """ Log in the user with email """
+        email = request.data.get('email')
+        password = request.data.get('password')
+        
+        if not email or not password:
+            raise ValidationError("Email and password are required")
+
+        user = user_model.objects.filter(email=email, is_active=True).first()
+        if not user:  
+            raise ValidationError("Invalid email or password")
+        if not user.check_password(password):
+            raise ValidationError("Invalid email or password")
+
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+            'user_info': {
+                'full_name': user.get_full_name(),
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'avatar': None
+            }
+        })
