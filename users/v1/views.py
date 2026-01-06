@@ -114,7 +114,7 @@ class LoginWithEmailView(APIView):
     """ View for logging in the user with email """
 
     permission_classes = []
-    
+
     @extend_schema(
         request=EmailLoginSerializer,
         responses={
@@ -180,7 +180,7 @@ class LoginWithEmailView(APIView):
         password = serializer.validated_data['password']
 
         user = user_model.objects.filter(email=email).first()
-        if not user:  
+        if not user:
             raise ValidationError("Invalid email or password")
         if not user.check_password(password):
             raise ValidationError("Invalid email or password")
