@@ -5,10 +5,10 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.conf import settings
-from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth import get_user_model
 
 from arbisoft_sessions_portal.services.google.google_user_info import GoogleUserInfoService
-from users.v1.serializers import LoginUserSerializer
+from users.v1.serializers import LoginUserSerializer, EmailLoginSerializer
 
 user_model = get_user_model()
 
@@ -116,24 +116,7 @@ class LoginWithEmailView(APIView):
     permission_classes = []
     
     @extend_schema(
-        request={
-            "type": "object",
-            "properties": {
-                "email": {
-                    "type": "string",
-                    "format": "email",
-                    "description": "User email address",
-                    "example": "user@example.com"
-                },
-                "password": {
-                    "type": "string",
-                    "format": "password",
-                    "description": "User password",
-                    "example": "securepassword123"
-                }
-            },
-            "required": ["email", "password"]
-        },
+        request=EmailLoginSerializer,
         responses={
             200: {
                 "type": "object",
@@ -190,13 +173,13 @@ class LoginWithEmailView(APIView):
     )
     def post(self, request):
         """ Log in the user with email """
-        email = request.data.get('email')
-        password = request.data.get('password')
-        
-        if not email or not password:
-            raise ValidationError("Email and password are required")
+        serializer = EmailLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-        user = user_model.objects.filter(email=email, is_active=True).first()
+        email = serializer.validated_data['email']
+        password = serializer.validated_data['password']
+
+        user = user_model.objects.filter(email=email).first()
         if not user:  
             raise ValidationError("Invalid email or password")
         if not user.check_password(password):
