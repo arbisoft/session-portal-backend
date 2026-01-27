@@ -110,6 +110,7 @@ class LoginUserView(APIView):
             }
         })
 
+
 class LoginWithEmailView(APIView):
     """ View for logging in the user with email """
 

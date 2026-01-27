@@ -6,6 +6,7 @@ class LoginUserSerializer(serializers.Serializer):
 
     auth_token = serializers.CharField(required=True)
 
+
 class EmailLoginSerializer(serializers.Serializer):
     """ Serializer for email/password login """
     email = serializers.EmailField(required=True)
