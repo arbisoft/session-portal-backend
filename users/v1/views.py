@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
 
 from arbisoft_sessions_portal.services.google.google_user_info import GoogleUserInfoService
 from users.v1.serializers import LoginUserSerializer, EmailLoginSerializer
@@ -179,10 +179,13 @@ class LoginWithEmailView(APIView):
         email = serializer.validated_data['email']
         password = serializer.validated_data['password']
 
+        # Django's default authentication backend uses the `username` field, not `email`.
+        # We first fetch the user by email, then authenticate using their username.
         user = user_model.objects.filter(email=email).first()
+        if user:
+            user = authenticate(username=user.username, password=password)
+
         if not user:
-            raise ValidationError("Invalid email or password")
-        if not user.check_password(password):
             raise ValidationError("Invalid email or password")
 
         refresh = RefreshToken.for_user(user)
