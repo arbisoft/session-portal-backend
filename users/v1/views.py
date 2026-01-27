@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 
 from arbisoft_sessions_portal.services.google.google_user_info import GoogleUserInfoService
-from users.v1.serializers import LoginUserSerializer, EmailLoginSerializer
+from users.v1.serializers import EmailLoginSerializer, LoginUserSerializer
 
 user_model = get_user_model()
 
