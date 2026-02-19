@@ -8,6 +8,8 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
+from users.factories import UserFactory
+
 User = get_user_model()
 
 
@@ -68,3 +70,51 @@ class TestLoginUserAPI:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.data[0] == "Not arbisoft user."
+
+
+@pytest.mark.django_db
+class TestLoginWithEmailAPI:
+    """ Test cases for LoginWithEmailView """
+
+    @pytest.fixture
+    def api_client(self):
+        """ Returns an instance of APIClient """
+        return APIClient()
+
+    @pytest.fixture
+    def user_password(self):
+        """ Returns a user password """
+        return "S3cureP@ssw0rd!"
+
+    @pytest.fixture
+    def user(self, user_password):
+        """ Returns a user """
+        user = UserFactory()
+        user.set_password(user_password)
+        user.save(update_fields=["password"])
+        return user
+
+    def test_successful_login_with_email_and_password(self, api_client, user, user_password):
+        """ Test successful login with email and password """
+        response = api_client.post(
+            reverse("login_with_email"),
+            {"email": user.email, "password": user_password},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert "refresh" in response.data
+        assert "access" in response.data
+        assert response.data["user_info"]["first_name"] == user.first_name
+        assert response.data["user_info"]["last_name"] == user.last_name
+
+    def test_login_with_email_invalid_password(self, api_client, user):
+        """ Test login with email and invalid password """
+        response = api_client.post(
+            reverse("login_with_email"),
+            {"email": user.email, "password": "wrong-password"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data[0] == "Invalid email or password"
