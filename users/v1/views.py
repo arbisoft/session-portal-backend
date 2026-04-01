@@ -85,7 +85,7 @@ class LoginUserView(APIView):
         if not user_info:
             raise ValidationError("Google Authentication failed")
 
-        if user_info.get("hd") != "arbisoft.com" and settings.ALLOW_ONLY_INTERNAL_USERS:
+        if user_info.get("hd") not in ["arbisoft.com", "edly.io"] and settings.ALLOW_ONLY_INTERNAL_USERS:
             raise ValidationError("Not arbisoft user.")
 
         user = user_model.objects.filter(email=user_info['email']).first()
