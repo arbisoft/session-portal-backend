@@ -119,6 +119,15 @@ class VideoAssetCreateSerializer(serializers.ModelSerializer):
         fields = ('id', 'title', 'video_file', 'status')
         read_only_fields = ('id', 'title', 'status')
 
+    def validate_video_file(self, value):
+        allowed = {"mp4", "mov", "avi", "webm"}
+        ext = os.path.splitext(value.name)[1].lower().lstrip(".")
+        if ext not in allowed:
+            raise serializers.ValidationError(
+                f"Unsupported file type '.{ext}'. Allowed formats: {', '.join(sorted(allowed))}."
+            )
+        return value
+
     def create(self, validated_data):
         filename = validated_data['video_file'].name
         title = os.path.splitext(os.path.basename(filename))[0]
