@@ -1,14 +1,18 @@
 from drf_spectacular.utils import extend_schema
 from rest_framework.exceptions import ValidationError
+from rest_framework.generics import ListAPIView
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
+from django.db.models import Q
 
 from arbisoft_sessions_portal.services.google.google_user_info import GoogleUserInfoService
-from users.v1.serializers import EmailLoginSerializer, LoginUserSerializer
+from users.permissions import IsStaffPermission
+from users.v1.serializers import EmailLoginSerializer, LoginUserSerializer, UserSearchSerializer
 
 user_model = get_user_model()
 
@@ -106,7 +110,8 @@ class LoginUserView(APIView):
                 'full_name': user_info.get('name'),
                 'first_name': user_info.get('given_name'),
                 'last_name': user_info.get('family_name'),
-                'avatar': user_info.get('picture')
+                'avatar': user_info.get('picture'),
+                'is_staff': user.is_staff,
             }
         })
 
@@ -197,6 +202,23 @@ class LoginWithEmailView(APIView):
                 'full_name': user.get_full_name(),
                 'first_name': user.first_name,
                 'last_name': user.last_name,
-                'avatar': None
+                'avatar': None,
+                'is_staff': user.is_staff,
             }
         })
+
+
+class UserSearchView(ListAPIView):
+    """ View for searching users by name or email (staff only) """
+
+    permission_classes = [IsAuthenticated, IsStaffPermission]
+    serializer_class = UserSearchSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        q = self.request.query_params.get('q', '').strip()
+        if not q:
+            return user_model.objects.none()
+        return user_model.objects.filter(
+            Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(email__icontains=q)
+        ).order_by('first_name')[:20]
