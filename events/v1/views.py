@@ -2,7 +2,7 @@ from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from django.db.models import F
+from django.db.models import F, Max
 from django.shortcuts import get_object_or_404
 
 from events.models import Event, Playlist, Tag, VideoAsset
@@ -48,7 +48,9 @@ class VideoAssetIncrementViewCountView(APIView):
 class TagListView(ListAPIView):
     """ View for listing all tags """
 
-    queryset = Tag.objects.all()
+    queryset = Tag.objects.annotate(
+        latest_event=Max('events__event_time')
+    ).order_by(F('latest_event').desc(nulls_last=True))
     serializer_class = TagListSerializer
     pagination_class = None
     filterset_class = TagFilter
@@ -57,7 +59,9 @@ class TagListView(ListAPIView):
 class PlaylistListView(ListAPIView):
     """ View for listing all playlists """
 
-    queryset = Playlist.objects.all()
+    queryset = Playlist.objects.annotate(
+        latest_event=Max('events__event_time')
+    ).order_by(F('latest_event').desc(nulls_last=True))
     serializer_class = PlaylistListSerializer
     pagination_class = None
     filterset_class = PlaylistFilter
