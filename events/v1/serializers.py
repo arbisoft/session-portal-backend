@@ -90,7 +90,7 @@ class VideoAssetSerializer(serializers.ModelSerializer):
     class Meta:
         model = VideoAsset
         fields = (
-            'title', 'video_file', 'duration', 'thumbnail', 'status', 'file_size', 'event'
+            'title', 'video_file', 'duration', 'thumbnail', 'status', 'file_size', 'view_count', 'event', 'captions_file'
         )
 
 

@@ -63,6 +63,18 @@ class TestEventsAPI:
         assert response.data["title"] == video_asset.title
         assert response.data["status"] == VideoAsset.VideoStatus.READY
 
+    def test_increment_video_asset_view_count(self, api_client):
+        """ Test that POST to view endpoint increments view_count by 1 """
+        video_asset = VideoAssetFactory()
+        assert video_asset.view_count == 0
+        url = reverse("video-asset-increment-view", args=[video_asset.event.slug])
+        response = api_client.post(url)
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["view_count"] == 1
+        # Call again — should be 2
+        response = api_client.post(url)
+        assert response.data["view_count"] == 2
+
     def test_list_playlists(self, api_client):
         """ Test listing all playlists """
         linked_playlist = PlaylistFactory(name="Used Playlist")
