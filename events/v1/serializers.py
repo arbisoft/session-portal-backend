@@ -1,3 +1,5 @@
+import os
+
 from rest_framework import serializers
 
 from django.contrib.auth import get_user_model
@@ -106,3 +108,79 @@ class PlaylistListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Playlist
         fields = ('id', 'name')
+
+
+class VideoAssetCreateSerializer(serializers.ModelSerializer):
+    """ Serializer for creating a VideoAsset via file upload """
+    video_file = serializers.FileField(required=True)
+
+    class Meta:
+        model = VideoAsset
+        fields = ('id', 'title', 'video_file', 'status')
+        read_only_fields = ('id', 'title', 'status')
+
+    def create(self, validated_data):
+        filename = validated_data['video_file'].name
+        title = os.path.splitext(os.path.basename(filename))[0]
+        return VideoAsset.objects.create(
+            title=title,
+            video_file=validated_data['video_file'],
+            status=VideoAsset.VideoStatus.PROCESSING,
+        )
+
+
+class EventCreateSerializer(serializers.ModelSerializer):
+    """ Serializer for creating an Event with all related data """
+    presenter_ids = serializers.ListField(
+        child=serializers.IntegerField(), write_only=True, required=False, default=list
+    )
+    playlists = serializers.PrimaryKeyRelatedField(
+        queryset=Playlist.objects.all(), many=True, required=False
+    )
+    tags = serializers.PrimaryKeyRelatedField(
+        queryset=Tag.objects.all(), many=True, required=False
+    )
+    video_asset_id = serializers.IntegerField(write_only=True)
+    thumbnail = serializers.ImageField(required=False, allow_null=True)
+
+    class Meta:
+        model = Event
+        fields = (
+            'title', 'description', 'event_time', 'playlists', 'tags',
+            'presenter_ids', 'video_asset_id', 'thumbnail',
+        )
+
+    def create(self, validated_data):
+        presenter_ids = validated_data.pop('presenter_ids', [])
+        playlists = validated_data.pop('playlists', [])
+        tags = validated_data.pop('tags', [])
+        video_asset_id = validated_data.pop('video_asset_id')
+        thumbnail = validated_data.pop('thumbnail', None)
+
+        event = Event.objects.create(
+            creator=self.context['request'].user,
+            event_type=Event.EventType.SESSION,
+            status=Event.EventStatus.PUBLISHED,
+            **validated_data,
+        )
+
+        if playlists:
+            event.playlists.set(playlists)
+
+        if tags:
+            event.tags.set(tags)
+
+        for user_id in presenter_ids:
+            EventPresenter.objects.get_or_create(event=event, user_id=user_id)
+
+        video_asset = VideoAsset.objects.filter(id=video_asset_id).first()
+        if video_asset:
+            video_asset.event = event
+            if thumbnail:
+                video_asset.thumbnail = thumbnail
+            video_asset.save(update_fields=['event', 'thumbnail'] if thumbnail else ['event'])
+
+        return event
+
+    def to_representation(self, instance):
+        return EventSerializer(instance, context=self.context).data
