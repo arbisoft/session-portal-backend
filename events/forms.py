@@ -21,7 +21,7 @@ class VideoAssetForm(forms.ModelForm):
 
     class Meta:
         model = VideoAsset
-        fields = ('title', 'video_file', 'thumbnail',)
+        fields = ('title', 'video_file', 'thumbnail', 'captions_file',)
 
     def clean(self):
         """ Infer, save and clean the data related to videoasset """
