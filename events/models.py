@@ -21,6 +21,10 @@ thumbnail_storage = FileSystemStorage(
     location=settings.MEDIA_ROOT / 'thumbnails',
     base_url=settings.MEDIA_URL + 'thumbnails/'
 )
+captions_storage = FileSystemStorage(
+    location=settings.MEDIA_ROOT / 'captions',
+    base_url=settings.MEDIA_URL + 'captions/'
+)
 
 
 class Tag(models.Model):
@@ -90,7 +94,9 @@ class VideoAsset(models.Model):
     duration = models.IntegerField(default=0)  # in seconds
     thumbnail = models.ImageField(storage=thumbnail_storage, null=True, blank=True)
     status = models.CharField(max_length=20, choices=VideoStatus.choices)
+    captions_file = models.FileField(storage=captions_storage, null=True, blank=True)
     file_size = models.BigIntegerField(default=0)  # in bytes
+    view_count = models.PositiveIntegerField(default=0)
     created = models.DateTimeField(auto_now_add=True)
     modified = models.DateTimeField(auto_now=True)
 
@@ -136,7 +142,10 @@ class VideoAsset(models.Model):
             except ValueError:
                 logger.error("Invalid duration value, unable to convert to float.")
 
-        super().save(*args, **kwargs)
+            # Always UPDATE on the second save — never re-INSERT
+            super().save(update_fields=['file_size', 'duration', 'thumbnail'])
+        else:
+            super().save(*args, **kwargs)
 
     def file_size_mb(self):
         """
