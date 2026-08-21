@@ -1,6 +1,8 @@
 from rest_framework.generics import ListAPIView, RetrieveAPIView
+from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from django.db.models import F
 from django.shortcuts import get_object_or_404
 
 from events.models import Event, Playlist, Tag, VideoAsset
@@ -30,6 +32,17 @@ class VideoAssetDetailView(RetrieveAPIView):
             event__slug=self.kwargs["event_slug"]
             )
         return obj
+
+
+class VideoAssetIncrementViewCountView(APIView):
+    """ Increment view count for a VideoAsset by 1 """
+
+    def post(self, request, event_slug, *args, **kwargs):
+        video_asset = get_object_or_404(VideoAsset, event__slug=event_slug)
+        video_asset.view_count = F('view_count') + 1
+        video_asset.save(update_fields=['view_count'])
+        video_asset.refresh_from_db(fields=['view_count'])
+        return Response({'view_count': video_asset.view_count})
 
 
 class TagListView(ListAPIView):
