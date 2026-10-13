@@ -354,6 +354,14 @@ class TestOpenAPISchema:
         assert response.status_code == status.HTTP_200_OK
         return response.json()
 
+    @pytest.mark.parametrize('path', ['/api/v1/users/login', '/api/v1/users/login/email'])
+    def test_login_documents_is_staff(self, schema, path):
+        """ Test that both login responses document the is_staff flag """
+        response_schema = schema['paths'][path]['post']['responses']['200']['content']['application/json']['schema']
+        user_info = response_schema['properties']['user_info']
+
+        assert user_info['properties']['is_staff']['type'] == 'boolean'
+
     def test_event_create_documents_full_event_response(self, schema):
         """ Test that the create endpoint documents the Event payload it actually returns """
         response_schema = schema['paths']['/api/v1/events/']['post']['responses']['201']['content']['application/json']

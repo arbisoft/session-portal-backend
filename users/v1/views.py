@@ -57,6 +57,11 @@ class LoginUserView(APIView):
                                 "type": "string",
                                 "format": "uri",
                                 "example": "https://lh3.googleusercontent.com/a/photo"
+                            },
+                            "is_staff": {
+                                "type": "boolean",
+                                "description": "Whether the user can upload videos and create events",
+                                "example": False
                             }
                         }
                     }
@@ -157,6 +162,11 @@ class LoginWithEmailView(APIView):
                                 "format": "uri",
                                 "example": None,
                                 "description": "User avatar URL, can be null"
+                            },
+                            "is_staff": {
+                                "type": "boolean",
+                                "description": "Whether the user can upload videos and create events",
+                                "example": False
                             }
                         }
                     }
