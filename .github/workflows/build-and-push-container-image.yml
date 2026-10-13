@@ -4,15 +4,55 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options:
+          - hks-stage
+          - hks-prod
+        default: hks-stage
+      image_tag:
+        description: >-
+          Full image tag to deploy (leave empty for auto-tagged
+          {stage|prod}-<full-sha> — to roll back, pass a complete tag
+          from a prior deploy, e.g. stage-<full-40-char-sha>)
+        required: false
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve Image Tag
+        id: meta
+        env:
+          TARGET_ENV: ${{ inputs.environment }}
+          INPUT_TAG: ${{ inputs.image_tag }}
+          STAGING_WORKFLOW_ID: ${{ secrets.GH_TRIGGER_WORKFLOW_ID_STAGING }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PREFIX=prod
+          if [ "$TARGET_ENV" = "hks-stage" ]; then
+            PREFIX=stage
+            [ -n "$STAGING_WORKFLOW_ID" ] || { echo "GH_TRIGGER_WORKFLOW_ID_STAGING is not set"; exit 1; }
+          fi
+          TAG="${INPUT_TAG:-$PREFIX-$GITHUB_SHA}"
+          [[ "$TAG" =~ ^$PREFIX-[0-9a-f]{40}$ ]] || { echo "Invalid image tag: $TAG"; exit 1; }
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ -n "$INPUT_TAG" ]; then
+            echo "rollback=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout Code
+        if: steps.meta.outputs.rollback != 'true'
         uses: actions/checkout@v4.2.2
 
       - name: Configure Credentials
+        if: steps.meta.outputs.rollback != 'true'
         uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -20,10 +60,12 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Login to AWS ECR
+        if: steps.meta.outputs.rollback != 'true'
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2.0.1
 
       - name: Build and Push Docker Image
+        if: steps.meta.outputs.rollback != 'true'
         uses: docker/build-push-action@v6.14.0
         with:
           context: .
@@ -32,7 +74,7 @@ jobs:
             GID=${{ secrets.APP_USER_GID }}
           target: app
           push: true
-          tags: ${{ secrets.CONTAINER_IMAGE_REPO }}/session-portal-backend:${{ github.ref_name }}, ${{ secrets.CONTAINER_IMAGE_REPO }}/session-portal-backend:latest
+          tags: ${{ secrets.CONTAINER_IMAGE_REPO }}/session-portal-backend:${{ steps.meta.outputs.tag }}${{ github.event_name == 'release' && format(', {0}/session-portal-backend:latest', secrets.CONTAINER_IMAGE_REPO) || '' }}
 
       - name: Create Temporary Deployment Token
         uses: actions/create-github-app-token@v2.0.6
@@ -49,7 +91,7 @@ jobs:
         env:
           OWNER: ${{ secrets.GH_TRIGGER_OWNER }}
           REPO: ${{ secrets.GH_TRIGGER_REPO }}
-          WORKFLOW_ID: ${{ secrets.GH_TRIGGER_WORKFLOW_ID }}
+          WORKFLOW_ID: ${{ inputs.environment == 'hks-stage' && secrets.GH_TRIGGER_WORKFLOW_ID_STAGING || secrets.GH_TRIGGER_WORKFLOW_ID }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -58,5 +100,5 @@ jobs:
                 repo: process.env.REPO,
                 workflow_id: process.env.WORKFLOW_ID,
                 ref: 'main',
-                inputs: { 'backend_version': '${{ github.ref_name }}' }
+                inputs: { 'backend_version': '${{ steps.meta.outputs.tag }}' }
               });
