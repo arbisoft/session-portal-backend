@@ -70,6 +70,12 @@ class TagListView(ListCreateAPIView):
     pagination_class = None
     filterset_class = TagFilter
 
+    def get_permissions(self):
+        """ Listing tags is open to any authenticated user, creating one is staff only """
+        if self.request.method == 'POST':
+            return [IsAuthenticated(), IsStaffPermission()]
+        return super().get_permissions()
+
 
 class PlaylistListView(ListAPIView):
     """ View for listing all playlists """
