@@ -27,4 +27,5 @@ class UserSearchSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_full_name(obj):
+        """ Get the full name of a user """
         return f"{obj.first_name} {obj.last_name}".strip()
