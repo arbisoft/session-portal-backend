@@ -48,11 +48,16 @@ class VideoAssetIncrementViewCountView(APIView):
     """ Increment view count for a VideoAsset by 1 """
 
     def post(self, request, event_slug, *args, **kwargs):
-        video_asset = get_object_or_404(VideoAsset, event__slug=event_slug)
-        video_asset.view_count = F('view_count') + 1
-        video_asset.save(update_fields=['view_count'])
-        video_asset.refresh_from_db(fields=['view_count'])
-        return Response({'view_count': video_asset.view_count})
+        """
+        Atomically increment the view count and return the value read back after the update.
+
+        A queryset update is used because VideoAsset.save() runs ffmpeg processing.
+        """
+        video_asset_id = get_object_or_404(VideoAsset.objects.values_list('pk', flat=True), event__slug=event_slug)
+
+        queryset = VideoAsset.objects.filter(pk=video_asset_id)
+        queryset.update(view_count=F('view_count') + 1)
+        return Response({'view_count': queryset.values_list('view_count', flat=True).get()})
 
 
 class TagListView(ListCreateAPIView):
