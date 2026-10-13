@@ -3,10 +3,13 @@ import os
 from rest_framework import serializers
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 
 from events.models import Event, EventPresenter, Playlist, Tag, VideoAsset
 
 user_model = get_user_model()
+
+VIDEO_ASSET_ASSIGNED_ERROR = 'This video asset is already assigned to an event.'
 
 
 class PublisherSerializer(serializers.ModelSerializer):
@@ -92,7 +95,8 @@ class VideoAssetSerializer(serializers.ModelSerializer):
     class Meta:
         model = VideoAsset
         fields = (
-            'title', 'video_file', 'duration', 'thumbnail', 'status', 'file_size', 'view_count', 'event', 'captions_file'
+            'title', 'video_file', 'duration', 'thumbnail', 'status', 'file_size', 'view_count', 'event',
+            'captions_file',
         )
 
 
@@ -120,6 +124,7 @@ class VideoAssetCreateSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'title', 'status')
 
     def validate_video_file(self, value):
+        """ Ensure the uploaded file has a supported video extension """
         allowed = {"mp4", "mov", "avi", "webm"}
         ext = os.path.splitext(value.name)[1].lower().lstrip(".")
         if ext not in allowed:
@@ -129,19 +134,32 @@ class VideoAssetCreateSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
+        """
+        Create the asset and mark it READY or FAILED.
+
+        VideoAsset.save() probes the file and extracts the thumbnail synchronously, logging ffmpeg failures instead
+        of raising, which leaves the duration at 0. The status is written with update() so it is not processed twice.
+        """
         filename = validated_data['video_file'].name
         title = os.path.splitext(os.path.basename(filename))[0]
-        return VideoAsset.objects.create(
+
+        video_asset = VideoAsset.objects.create(
             title=title,
             video_file=validated_data['video_file'],
             status=VideoAsset.VideoStatus.PROCESSING,
         )
+        video_asset.status = VideoAsset.VideoStatus.READY if video_asset.duration > 0 else VideoAsset.VideoStatus.FAILED
+        VideoAsset.objects.filter(pk=video_asset.pk).update(status=video_asset.status)
+        return video_asset
 
 
 class EventCreateSerializer(serializers.ModelSerializer):
     """ Serializer for creating an Event with all related data """
     presenter_ids = serializers.ListField(
-        child=serializers.IntegerField(), write_only=True, required=False, default=list
+        child=serializers.PrimaryKeyRelatedField(queryset=user_model.objects.all()),
+        write_only=True,
+        required=False,
+        default=list,
     )
     playlists = serializers.PrimaryKeyRelatedField(
         queryset=Playlist.objects.all(), many=True, required=False
@@ -149,7 +167,9 @@ class EventCreateSerializer(serializers.ModelSerializer):
     tags = serializers.PrimaryKeyRelatedField(
         queryset=Tag.objects.all(), many=True, required=False
     )
-    video_asset_id = serializers.IntegerField(write_only=True)
+    video_asset_id = serializers.PrimaryKeyRelatedField(
+        queryset=VideoAsset.objects.all(), source='video_asset', write_only=True
+    )
     thumbnail = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
@@ -159,12 +179,31 @@ class EventCreateSerializer(serializers.ModelSerializer):
             'presenter_ids', 'video_asset_id', 'thumbnail',
         )
 
+    def validate_video_asset_id(self, value):
+        """ Ensure the video is processed and not already assigned to another event """
+        if value.event_id is not None:
+            raise serializers.ValidationError(VIDEO_ASSET_ASSIGNED_ERROR)
+        if value.status != VideoAsset.VideoStatus.READY:
+            raise serializers.ValidationError('This video asset is not ready to be published.')
+        return value
+
+    @transaction.atomic
     def create(self, validated_data):
-        presenter_ids = validated_data.pop('presenter_ids', [])
+        """
+        Create the event and attach the video asset to it.
+
+        The asset row is locked and re-checked so concurrent requests cannot both claim it. It is attached with
+        update() because VideoAsset.save() would probe the video and regenerate its thumbnail again.
+        """
+        presenters = validated_data.pop('presenter_ids', [])
         playlists = validated_data.pop('playlists', [])
         tags = validated_data.pop('tags', [])
-        video_asset_id = validated_data.pop('video_asset_id')
+        video_asset = validated_data.pop('video_asset')
         thumbnail = validated_data.pop('thumbnail', None)
+
+        video_asset = VideoAsset.objects.select_for_update().filter(pk=video_asset.pk, event__isnull=True).first()
+        if video_asset is None:
+            raise serializers.ValidationError({'video_asset_id': VIDEO_ASSET_ASSIGNED_ERROR})
 
         event = Event.objects.create(
             creator=self.context['request'].user,
@@ -179,15 +218,15 @@ class EventCreateSerializer(serializers.ModelSerializer):
         if tags:
             event.tags.set(tags)
 
-        for user_id in presenter_ids:
-            EventPresenter.objects.get_or_create(event=event, user_id=user_id)
+        EventPresenter.objects.bulk_create(
+            [EventPresenter(event=event, user=user) for user in dict.fromkeys(presenters)]
+        )
 
-        video_asset = VideoAsset.objects.filter(id=video_asset_id).first()
-        if video_asset:
-            video_asset.event = event
-            if thumbnail:
-                video_asset.thumbnail = thumbnail
-            video_asset.save(update_fields=['event', 'thumbnail'] if thumbnail else ['event'])
+        asset_changes = {'event': event}
+        if thumbnail:
+            video_asset.thumbnail.save(thumbnail.name, thumbnail, save=False)
+            asset_changes['thumbnail'] = video_asset.thumbnail.name
+        VideoAsset.objects.filter(pk=video_asset.pk).update(**asset_changes)
 
         return event
 

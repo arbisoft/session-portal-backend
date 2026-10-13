@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.generics import CreateAPIView, ListAPIView, ListCreateAPIView, RetrieveAPIView
 from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -111,6 +112,7 @@ class VideoAssetCreateView(CreateAPIView):
     parser_classes = [MultiPartParser]
 
 
+@extend_schema_view(post=extend_schema(responses={201: EventSerializer}))
 class EventCreateView(CreateAPIView):
     """ View for creating an event with metadata (staff only) """
 
