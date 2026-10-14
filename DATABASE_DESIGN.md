@@ -2,11 +2,11 @@
 
 erDiagram
     auth_User ||--o{ Event : creates
-    Event ||--|{ VideoAsset : contains
+    Event |o--o{ VideoAsset : contains
     Event ||--o{ EventTag : has
-    Tag }|--o{ EventTag : contains
+    Tag ||--o{ EventTag : contains
     Event ||--o{ EventPlaylist : has
-    Playlist }|--o{ EventPlaylist : contains
+    Playlist ||--o{ EventPlaylist : contains
     Event ||--o{ EventPresenter : has
     auth_User ||--o{ EventPresenter : presents
 
@@ -33,57 +33,58 @@ erDiagram
         int id PK
         int creator_id FK
         string title
+        string slug "nullable, set by post_save signal"
         text description
         datetime event_time
         string event_type
         string status
-        string workstream_id
+        string workstream_id "nullable"
         boolean is_featured
-        datetime created_at
-        datetime updated_at
+        datetime created
+        datetime modified
     }
 
     VideoAsset {
         int id PK
-        int event_id FK
+        int event_id FK "nullable"
         string title
-        string video_file
-        integer duration
-        string thumbnail
+        string video_file "nullable"
+        integer duration "seconds"
+        string thumbnail "nullable"
         string status
-        integer file_size
-        datetime created_at
-        datetime updated_at
+        string captions_file "nullable"
+        bigint file_size "bytes"
+        integer view_count
+        datetime created
+        datetime modified
     }
 
     Tag {
         int id PK
-        string name
+        string name "unique"
         string description
-        datetime created_at
-        datetime updated_at
+        datetime created
+        datetime modified
     }
 
     EventTag {
         int id PK
         int event_id FK
         int tag_id FK
-        datetime created_at
     }
 
     Playlist {
         int id PK
-        string name
+        string name "unique"
         string description
-        datetime created_at
-        datetime updated_at
+        datetime created
+        datetime modified
     }
 
     EventPlaylist {
         int id PK
         int event_id FK
         int playlist_id FK
-        datetime created_at
     }
 
     EventPresenter {
@@ -123,3 +124,14 @@ erDiagram
     %% }
 
 ```
+
+## Notes
+
+- The source of truth is `events/models.py`. Update this diagram in the same change as a model or migration.
+- `EventTag` and `EventPlaylist` are the join tables Django generates for `Event.tags` and `Event.playlists` (`events_event_tags`, `events_event_playlists`); they are not separate models and have no timestamps.
+- `EventPresenter` is an explicit model with `unique_together = (event, user)`.
+- `event_type` is `SESSION`. `Event.status` is `DRAFT`, `PUBLISHED` or `ARCHIVED`, defaulting to `DRAFT`. `VideoAsset.status` is `PROCESSING`, `READY` or `FAILED`.
+- A `VideoAsset` can exist without an event: the upload endpoint creates the asset first, and the event-creation endpoint attaches it.
+- The explicit foreign keys (`Event.creator`, `VideoAsset.event`, `EventPresenter.event`, `EventPresenter.user`) use `on_delete=DO_NOTHING`.
+- `VideoAsset.video_file` only accepts the `mp4`, `mov`, `avi` and `webm` extensions.
+- `auth_User` is Django's built-in user model; the `users` app defines no models.
