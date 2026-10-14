@@ -10,9 +10,9 @@ on:
         required: true
         type: choice
         options:
-          - hks-stage
-          - hks-prod
-        default: hks-stage
+          - stage
+          - prod
+        default: stage
       image_tag:
         description: >-
           Full image tag to deploy (leave empty for auto-tagged
@@ -36,7 +36,7 @@ jobs:
             exit 0
           fi
           PREFIX=prod
-          if [ "$TARGET_ENV" = "hks-stage" ]; then
+          if [ "$TARGET_ENV" = "stage" ]; then
             PREFIX=stage
             [ -n "$STAGING_WORKFLOW_ID" ] || { echo "GH_TRIGGER_WORKFLOW_ID_STAGING is not set"; exit 1; }
           fi
@@ -91,7 +91,7 @@ jobs:
         env:
           OWNER: ${{ secrets.GH_TRIGGER_OWNER }}
           REPO: ${{ secrets.GH_TRIGGER_REPO }}
-          WORKFLOW_ID: ${{ inputs.environment == 'hks-stage' && secrets.GH_TRIGGER_WORKFLOW_ID_STAGING || secrets.GH_TRIGGER_WORKFLOW_ID }}
+          WORKFLOW_ID: ${{ inputs.environment == 'stage' && secrets.GH_TRIGGER_WORKFLOW_ID_STAGING || secrets.GH_TRIGGER_WORKFLOW_ID }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
