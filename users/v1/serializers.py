@@ -17,6 +17,11 @@ class EmailLoginSerializer(serializers.Serializer):
     password = serializers.CharField(required=True, write_only=True)
 
 
+def get_user_full_name(user) -> str:
+    """ Full name of the user, falling back to the email because Google-created usernames are synthesized """
+    return user.get_full_name() or user.email
+
+
 class UserSearchSerializer(serializers.ModelSerializer):
     """ Serializer for user search results """
     full_name = serializers.SerializerMethodField()
@@ -26,6 +31,22 @@ class UserSearchSerializer(serializers.ModelSerializer):
         fields = ('id', 'first_name', 'last_name', 'full_name', 'email')
 
     @staticmethod
-    def get_full_name(obj):
+    def get_full_name(obj) -> str:
         """ Get the full name of a user """
-        return f"{obj.first_name} {obj.last_name}".strip()
+        return get_user_full_name(obj)
+
+
+class CurrentUserSerializer(serializers.ModelSerializer):
+    """ Serializer for the authenticated user's basic information """
+
+    full_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ("id", "first_name", "last_name", "full_name", "email", "is_staff")
+        read_only_fields = fields
+
+    @staticmethod
+    def get_full_name(obj) -> str:
+        """ Get the full name of a user """
+        return get_user_full_name(obj)
