@@ -60,7 +60,7 @@ jobs:
           tags: ${{ secrets.CONTAINER_IMAGE_REPO }}/session-portal-backend:${{ steps.meta.outputs.tag }}${{ github.event_name == 'release' && format(', {0}/session-portal-backend:latest', secrets.CONTAINER_IMAGE_REPO) || '' }}
 
       - name: Create Temporary Deployment Token
-        uses: actions/create-github-app-token@v2.0.6
+        uses: actions/create-github-app-token@v3.3.0
         id: app-token
         with:
           app-id: ${{ secrets.GH_APP_ID }}
