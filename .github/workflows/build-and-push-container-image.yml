@@ -35,7 +35,7 @@ jobs:
           echo "tag=$TARGET_ENV-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Code
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7
 
       - name: Configure Credentials
         uses: aws-actions/configure-aws-credentials@v4.1.0
