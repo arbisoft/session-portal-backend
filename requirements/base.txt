@@ -15,7 +15,7 @@ pillow==13.0.0
 psycopg2-binary==2.9.13
 python-dotenv==1.2.4
 PyJWT==2.15.1
-redis==6.4.0
+redis==8.1.0
 requests==2.34.2
 responses==0.26.3
 setuptools==84.2.0
