@@ -3,7 +3,7 @@ from django.db import models
 from django.forms import Textarea, TextInput
 
 from events.forms import EventAdminForm, EventPresenterForm, VideoAssetForm
-from events.models import Event, EventPresenter, Playlist, Tag, VideoAsset
+from events.models import Event, EventPresenter, Playlist, Tag, UploadSession, VideoAsset
 from events.tasks import download_google_drive_video
 
 
@@ -25,6 +25,24 @@ class VideoAssetAdmin(admin.ModelAdmin):
             download_google_drive_video.delay(obj.id, google_drive_link)
             obj.status = VideoAsset.VideoStatus.PROCESSING
             obj.save(update_fields=["status"])
+
+
+class UploadSessionAdmin(admin.ModelAdmin):
+    """ Read-only view of resumable upload sessions for operators """
+    list_display = ('id', 'owner', 'filename', 'status', 'offset', 'file_size', 'expires_at', 'modified')
+    list_filter = ('status',)
+    list_select_related = ('owner',)
+    raw_id_fields = ('owner', 'video_asset')
+    search_fields = ('id', 'filename', 'owner__email')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class EventPresenterInline(admin.StackedInline):
@@ -85,3 +103,4 @@ admin.site.register(Event, EventAdmin)
 admin.site.register(Playlist)
 admin.site.register(Tag)
 admin.site.register(VideoAsset, VideoAssetAdmin)
+admin.site.register(UploadSession, UploadSessionAdmin)

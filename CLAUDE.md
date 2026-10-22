@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Django 4.2 + DRF backend for Arbisoft's internal "Sessions Portal" (recorded sessions/events with video, tags, playlists, presenters). Python 3.12, PostgreSQL required (uses `django.contrib.postgres` trigram search, so SQLite won't work). Celery + Redis are used only for Google Drive video imports.
+Django 4.2 + DRF backend for Arbisoft's internal "Sessions Portal" (recorded sessions/events with video, tags, playlists, presenters). Python 3.12, PostgreSQL required (uses `django.contrib.postgres` trigram search, so SQLite won't work). Celery + Redis are used for Google Drive video imports and for finalizing resumable uploads.
 
 ## Commands
 
@@ -29,7 +29,7 @@ export GID=$(id -g) UID=$(id -u) && docker-compose up --build
 docker-compose --profile dev up lint
 docker-compose --profile dev up test
 
-# Celery worker (only needed for Google Drive downloads)
+# Celery worker (needed for Google Drive downloads and resumable-upload finalization)
 celery -A arbisoft_sessions_portal worker -l info
 
 # Management commands (events/management/commands/)
@@ -50,6 +50,9 @@ Auth defaults (`settings/base.py`): JWT (simplejwt) + session auth, and `IsAuthe
 
 ### Event creation is a two-step flow
 Staff first `POST /videoassets/` (multipart upload → `VideoAsset` with no event), then `POST /` with `video_asset_id` to create the `Event` and attach the asset (`EventCreateSerializer`). Events are always created `PUBLISHED`/`SESSION` with the requester as creator. Django admin is the other path to the same data, where `VideoAssetAdmin` can also enqueue `events.tasks.download_google_drive_video` from a Drive link, and `EventAdminForm` attaches an asset via a non-model `videoasset` field.
+
+### Resumable uploads
+Large videos go through `/api/v1/events/videoassets/` (JSON `POST` starts a session, `videoassets/<uuid>/` takes chunks; multipart `POST` is still the single-request upload). Logic is in `events/v1/uploads.py` (`UploadSession` model), finalization in the `events.tasks.finalize_upload_session` Celery task. The committed `offset` is the source of truth and only moves after the chunk is fsynced under a row lock. See `UPLOADS.md` before changing any of it; `cleanup_upload_sessions` must be scheduled externally.
 
 ### Things that are easy to trip over
 - **`VideoAsset.save()` runs ffmpeg synchronously** whenever `video_file` is set: it saves, probes duration, extracts a thumbnail at ~20% of the duration, then saves again with `update_fields`. ffmpeg errors are logged, not raised, leaving `duration == 0` (the upload serializer treats that as `FAILED`). Use `QuerySet.update()` when you only need to touch other columns (as `VideoAssetIncrementViewCountView` and `VideoAssetCreateSerializer` do). The `ffmpeg` binary must be installed.
