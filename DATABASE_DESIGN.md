@@ -3,6 +3,8 @@
 erDiagram
     auth_User ||--o{ Event : creates
     Event |o--o{ VideoAsset : contains
+    auth_User ||--o{ UploadSession : owns
+    VideoAsset |o--o{ UploadSession : produced_by
     Event ||--o{ EventTag : has
     Tag ||--o{ EventTag : contains
     Event ||--o{ EventPlaylist : has
@@ -55,6 +57,22 @@ erDiagram
         string captions_file "nullable"
         bigint file_size "bytes"
         integer view_count
+        datetime created
+        datetime modified
+    }
+
+    UploadSession {
+        uuid id PK
+        int owner_id FK
+        string client_key "unique per owner when set"
+        string filename "display only"
+        bigint file_size "bytes, > 0"
+        bigint offset "committed bytes, 0..file_size"
+        string checksum_sha256 "optional"
+        string status
+        string error_code
+        int video_asset_id FK "nullable"
+        datetime expires_at
         datetime created
         datetime modified
     }
@@ -134,4 +152,5 @@ erDiagram
 - A `VideoAsset` can exist without an event: the upload endpoint creates the asset first, and the event-creation endpoint attaches it.
 - The explicit foreign keys (`Event.creator`, `VideoAsset.event`, `EventPresenter.event`, `EventPresenter.user`) use `on_delete=DO_NOTHING`.
 - `VideoAsset.video_file` only accepts the `mp4`, `mov`, `avi` and `webm` extensions.
+- `UploadSession` tracks one resumable upload (see `UPLOADS.md`). `status` is `UPLOADING`, `FINALIZING`, `COMPLETED`, `FAILED`, `CANCELLED` or `EXPIRED`. Check constraints keep `file_size > 0` and `0 <= offset <= file_size`; `(owner, client_key)` is unique when `client_key` is not empty; `(status, expires_at)` is indexed for the cleanup sweep. `owner` uses `DO_NOTHING` like the other user keys; `video_asset` uses `SET_NULL` because the session is bookkeeping and must not block deleting an asset. The bytes live on disk, never in the database.
 - `auth_User` is Django's built-in user model; the `users` app defines no models.
