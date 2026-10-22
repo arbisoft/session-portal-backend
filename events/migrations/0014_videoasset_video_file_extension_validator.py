@@ -22,7 +22,7 @@ class Migration(migrations.Migration):
                     location=pathlib.PurePosixPath('/app/arbisoft_sessions_portal/media/videos'),
                 ),
                 upload_to='',
-                validators=[django.core.validators.FileExtensionValidator(['avi', 'mov', 'mp4', 'webm'])],
+                validators=[django.core.validators.FileExtensionValidator(['mp4', 'mov', 'avi', 'webm'])],
             ),
         ),
     ]

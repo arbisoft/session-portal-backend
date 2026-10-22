@@ -47,6 +47,11 @@ REST_FRAMEWORK = {
         'django_filters.rest_framework.DjangoFilterBackend',
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_THROTTLE_RATES': {
+        'upload_create': '30/hour',
+        'upload_chunk': '2000/min',
+        'upload_status': '600/min',
+    },
 }
 
 # Application definition
@@ -174,6 +179,21 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(days=7),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
 }
+
+GIB = 1024 ** 3
+MIB = 1024 ** 2
+
+# Resumable uploads. Partial files live on the shared media volume so any web or Celery worker can continue them.
+RESUMABLE_UPLOAD_ROOT = Path(os.getenv("RESUMABLE_UPLOAD_ROOT", MEDIA_ROOT / 'uploads'))
+RESUMABLE_UPLOAD_MAX_FILE_BYTES = int(os.getenv("RESUMABLE_UPLOAD_MAX_FILE_BYTES", 20 * GIB))
+RESUMABLE_UPLOAD_CHUNK_BYTES = int(os.getenv("RESUMABLE_UPLOAD_CHUNK_BYTES", 8 * MIB))
+# Hard per-request cap. Any reverse proxy in front of Django must accept request bodies at least this large.
+RESUMABLE_UPLOAD_MAX_CHUNK_BYTES = int(os.getenv("RESUMABLE_UPLOAD_MAX_CHUNK_BYTES", 16 * MIB))
+RESUMABLE_UPLOAD_SESSION_TTL_HOURS = int(os.getenv("RESUMABLE_UPLOAD_SESSION_TTL_HOURS", 72))
+RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER = int(os.getenv("RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER", 3))
+RESUMABLE_UPLOAD_MIN_FREE_BYTES = int(os.getenv("RESUMABLE_UPLOAD_MIN_FREE_BYTES", 1 * GIB))
+RESUMABLE_UPLOAD_FINALIZE_STALE_MINUTES = int(os.getenv("RESUMABLE_UPLOAD_FINALIZE_STALE_MINUTES", 30))
+RESUMABLE_UPLOAD_RETENTION_DAYS = int(os.getenv("RESUMABLE_UPLOAD_RETENTION_DAYS", 7))
 
 CELERY_BROKER_URL = "redis://redis:6379/0"
 CELERY_RESULT_BACKEND = 'redis://redis:6379/0'

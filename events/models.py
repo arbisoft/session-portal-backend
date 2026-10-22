@@ -1,5 +1,6 @@
 import logging
 import os
+import uuid
 
 import ffmpeg
 
@@ -12,6 +13,8 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 logger = logging.getLogger("asp_api")
+
+ALLOWED_VIDEO_EXTENSIONS = ("mp4", "mov", "avi", "webm")
 
 User = get_user_model()
 video_storage = FileSystemStorage(
@@ -95,7 +98,7 @@ class VideoAsset(models.Model):
         storage=video_storage,
         null=True,
         blank=True,
-        validators=[FileExtensionValidator(["mp4", "mov", "avi", "webm"])],
+        validators=[FileExtensionValidator(list(ALLOWED_VIDEO_EXTENSIONS))],
     )
     duration = models.IntegerField(default=0)  # in seconds
     thumbnail = models.ImageField(storage=thumbnail_storage, null=True, blank=True)
@@ -181,6 +184,63 @@ class VideoAsset(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class UploadSession(models.Model):
+    """
+    Durable state of one resumable video upload.
+
+    ``offset`` is the number of contiguous bytes of the partial file that the server has fsynced and committed. It is
+    the only source of truth for resuming. Writers hold a row lock while appending, so ``offset`` never moves without
+    matching bytes on disk, except to be lowered to the on-disk size after data loss.
+    """
+    class UploadStatus(models.TextChoices):
+        """ Enum for upload session status """
+        UPLOADING = "UPLOADING", _("Uploading")
+        FINALIZING = "FINALIZING", _("Finalizing")
+        COMPLETED = "COMPLETED", _("Completed")
+        FAILED = "FAILED", _("Failed")
+        CANCELLED = "CANCELLED", _("Cancelled")
+        EXPIRED = "EXPIRED", _("Expired")
+
+    ACTIVE_STATUSES = (UploadStatus.UPLOADING, UploadStatus.FINALIZING)
+    TERMINAL_STATUSES = (UploadStatus.COMPLETED, UploadStatus.FAILED, UploadStatus.CANCELLED, UploadStatus.EXPIRED)
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(User, on_delete=models.DO_NOTHING, related_name='upload_sessions')
+    client_key = models.CharField(max_length=64, blank=True, default='')
+    filename = models.CharField(max_length=255)
+    file_size = models.BigIntegerField()
+    offset = models.BigIntegerField(default=0)
+    checksum_sha256 = models.CharField(max_length=64, blank=True, default='')
+    status = models.CharField(max_length=20, choices=UploadStatus.choices, default=UploadStatus.UPLOADING)
+    error_code = models.CharField(max_length=50, blank=True, default='')
+    video_asset = models.ForeignKey(
+        VideoAsset, on_delete=models.SET_NULL, related_name='upload_sessions', null=True, blank=True
+    )
+    expires_at = models.DateTimeField()
+    created = models.DateTimeField(auto_now_add=True)
+    modified = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(check=models.Q(file_size__gt=0), name='upload_session_file_size_positive'),
+            models.CheckConstraint(
+                check=models.Q(offset__gte=0, offset__lte=models.F('file_size')),
+                name='upload_session_offset_within_file',
+            ),
+            models.UniqueConstraint(
+                fields=['owner', 'client_key'],
+                condition=~models.Q(client_key=''),
+                name='upload_session_unique_client_key',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['status', 'expires_at'], name='upload_session_status_exp_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.id} ({self.status})"
 
 
 class EventPresenter(models.Model):

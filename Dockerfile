@@ -37,6 +37,9 @@ COPY . /app/
 
 RUN chmod +x /app/entrypoint.sh
 
+RUN mkdir -p /app/arbisoft_sessions_portal/media \
+    && chown -R app:app /app/arbisoft_sessions_portal/media
+
 USER app
 
 FROM base AS dev
