@@ -197,6 +197,12 @@ RESUMABLE_UPLOAD_RETENTION_DAYS = int(os.getenv("RESUMABLE_UPLOAD_RETENTION_DAYS
 
 CELERY_BROKER_URL = "redis://redis:6379/0"
 CELERY_RESULT_BACKEND = 'redis://redis:6379/0'
+CELERY_BEAT_SCHEDULE = {
+    'cleanup-upload-sessions': {
+        'task': 'events.tasks.cleanup_upload_sessions',
+        'schedule': 60 * 60,
+    },
+}
 
 LOGGING = {
     'version': 1,

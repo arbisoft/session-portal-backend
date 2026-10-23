@@ -207,7 +207,7 @@ Before you begin, ensure that you have the following installed:
 Create `.env` and `local.py` as described above, with `DB_HOST=db`. They are not copied into the image (see `.dockerignore`); the containers get them from the `.:/app` bind mount.
 
 ### Build and Start Docker Containers
-This command will rebuild and start all the services using the configuration defined in docker-compose.yml: `db` (PostgreSQL 16), `redis`, `celery`, and `django`. The `django` container runs `python manage.py migrate` through `entrypoint.sh` before starting the server.
+This command will rebuild and start all the services using the configuration defined in docker-compose.yml: `db` (PostgreSQL 16), `redis`, `celery`, `celery-beat`, and `django`. The `django` container runs `python manage.py migrate` through `entrypoint.sh` before starting the server.
 
 ```bash
 export GID=$(id -g)
@@ -256,7 +256,7 @@ $ python manage.py prepopulate_events CSV_FILE [--dry-run] [--skip-video-downloa
 $ python manage.py cleanup_upload_sessions
 ```
 - `check_videoasset_status` prints the status of video assets. Pass asset IDs, `--all`, or `--recent HOURS`; `--processing` narrows the output to processing and failed assets.
-- `cleanup_upload_sessions` expires abandoned resumable uploads and deletes their leftovers. Schedule it hourly; see [UPLOADS.md](UPLOADS.md).
+- `cleanup_upload_sessions` expires abandoned resumable uploads and deletes their leftovers. Celery beat runs it hourly; see [UPLOADS.md](UPLOADS.md).
 - `prepopulate_events` imports events from a CSV with the columns `Title`, `Details`, `Trainer`, `Publish Date`, `Link`, `Playlist`, and `Tags`. It queues the Google Drive downloads on Celery, so Redis and a worker must be running unless you pass `--skip-video-download`. Use `--dry-run` first.
 
 ## CI and deployment

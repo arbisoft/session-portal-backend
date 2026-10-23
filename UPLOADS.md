@@ -77,7 +77,7 @@ All read from the environment (see `settings/base.py`).
 
 ## Cleanup
 
-`python manage.py cleanup_upload_sessions` (or the Celery task `events.tasks.cleanup_upload_sessions`) expires sessions past their TTL, re-queues stalled finalizations, deletes old closed rows and removes partial files that no active session owns (older than one hour). **Nothing in the repository schedules it**: run it hourly from cron or Celery beat.
+`python manage.py cleanup_upload_sessions` (or the Celery task `events.tasks.cleanup_upload_sessions`) expires sessions past their TTL, re-queues stalled finalizations, deletes old closed rows and removes partial files that no active session owns (older than one hour). `CELERY_BEAT_SCHEDULE` in `settings/base.py` runs the task hourly, and the `celery-beat` service in `docker-compose.yml` starts the scheduler. Outside Docker, run `celery -A arbisoft_sessions_portal beat -l info` next to the worker, or call the management command hourly from cron. Run only one beat process.
 
 ## Infrastructure limits to check
 
