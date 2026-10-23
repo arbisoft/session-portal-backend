@@ -54,6 +54,6 @@
 
 ## Celery Tasks
 
-- Celery is used only for Google Drive video imports (`events/tasks.py`). Tasks must be idempotent.
+- Celery is used for Google Drive video imports and for resumable-upload finalization and cleanup (`events/tasks.py`). Tasks must be idempotent.
 - Use `logging`, not `print()`.
 - Pass IDs to tasks, not model instances.

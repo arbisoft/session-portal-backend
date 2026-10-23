@@ -121,7 +121,7 @@ Type: REST API (Django 4.2 + DRF), PostgreSQL required (django.contrib.postgres,
 Apps: users (no models; django.contrib.auth.User), events (Event, Tag, Playlist, VideoAsset, EventPresenter)
 API: /api/v1/users/, /api/v1/events/; generated docs at /api/schema/, /api/docs/, /api/redoc/ (drf-spectacular)
 Auth: JWT (simplejwt) + session auth; IsAuthenticated default; Google OAuth token or email/password login
-Background work: Celery + Redis, only for Google Drive video imports
+Background work: Celery + Redis, for Google Drive video imports and resumable-upload finalization/cleanup
 External binaries: ffmpeg (VideoAsset.save() runs it synchronously)
 Python 3.12; Postgres 16 in compose and CI
 Quality gate: tox -e quality (pylint, pycodestyle, isort --check over events users); pytest --cov with fail_under = 80
@@ -252,13 +252,13 @@ Preserve the existing order and tone. Required sections, adding only what is mis
 
 ```
 # Arbisoft Sessions Portal            (badges and one-line purpose)
-## Prerequisites                       Python 3.12, PostgreSQL 16, ffmpeg, Redis (Drive imports), Docker (optional)
+## Prerequisites                       Python 3.12, PostgreSQL 16, ffmpeg, Redis (Drive imports and resumable uploads), Docker (optional)
 ## Set up Environment Variables        .env with the DB_* and DJANGO_* names
 ## Code setup                          local.py from local.example.py
 ## Option 1: Virtual Environment       pyenv, install requirements, createdb, migrate, runserver
 ## Option 2: Docker                    export GID/UID, docker-compose up --build
 ### Run Linting / Run Tests            tox -e quality; pytest --cov --cov-report=term; compose --profile dev
-## Celery worker                       only for Google Drive downloads
+## Redis and Celery                   Google Drive downloads and resumable-upload finalization
 ## API documentation                   /api/docs/, /api/redoc/
 ```
 

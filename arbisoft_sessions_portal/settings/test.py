@@ -15,6 +15,8 @@ DATABASES = {
 
 DEBUG = False
 
+SENTRY_DSN = None
+
 AUTH_PASSWORD_VALIDATORS = []
 
 CELERY_BROKER_URL = 'memory://'

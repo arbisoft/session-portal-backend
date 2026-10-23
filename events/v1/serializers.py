@@ -1,11 +1,15 @@
+import base64
+import binascii
 import os
 
 from rest_framework import serializers
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
-from events.models import Event, EventPresenter, Playlist, Tag, VideoAsset
+from events.models import Event, EventPresenter, Playlist, Tag, UploadSession, VideoAsset
+from events.v1.uploads import clean_display_filename, confirmed_offset, validate_video_extension
 
 user_model = get_user_model()
 
@@ -125,12 +129,7 @@ class VideoAssetCreateSerializer(serializers.ModelSerializer):
 
     def validate_video_file(self, value):
         """ Ensure the uploaded file has a supported video extension """
-        allowed = {"mp4", "mov", "avi", "webm"}
-        ext = os.path.splitext(value.name)[1].lower().lstrip(".")
-        if ext not in allowed:
-            raise serializers.ValidationError(
-                f"Unsupported file type '.{ext}'. Allowed formats: {', '.join(sorted(allowed))}."
-            )
+        validate_video_extension(value.name)
         return value
 
     def create(self, validated_data):
@@ -232,3 +231,88 @@ class EventCreateSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         return EventSerializer(instance, context=self.context).data
+
+
+class UploadSessionCreateSerializer(serializers.Serializer):  # pylint: disable=abstract-method
+    """ Validates the request that starts a resumable upload """
+    filename = serializers.CharField(max_length=255)
+    file_size = serializers.IntegerField(min_value=1)
+    checksum_sha256 = serializers.RegexField(r'^[0-9a-fA-F]{64}$', required=False, allow_blank=True, default='')
+    client_key = serializers.RegexField(r'^[A-Za-z0-9_-]{8,64}$', required=False, allow_blank=True, default='')
+
+    def validate_filename(self, value):
+        """ Keep a display-only name and require a supported video extension """
+        return validate_video_extension(clean_display_filename(value))
+
+    def validate_file_size(self, value):
+        """ Reject files above the configured upload limit """
+        if value > settings.RESUMABLE_UPLOAD_MAX_FILE_BYTES:
+            raise serializers.ValidationError(
+                f"File is too large. The maximum size is {settings.RESUMABLE_UPLOAD_MAX_FILE_BYTES} bytes."
+            )
+        return value
+
+    def validate_checksum_sha256(self, value):
+        """ Normalize to lower case so it compares with hashlib digests """
+        return value.lower()
+
+
+class UploadChunkHeadersSerializer(serializers.Serializer):  # pylint: disable=abstract-method
+    """ Validates the headers of a chunk request. The chunk bytes themselves are streamed, never parsed """
+    offset = serializers.IntegerField(min_value=0)
+    content_length = serializers.IntegerField(min_value=1)
+    checksum = serializers.CharField(required=False, allow_blank=True, default='')
+
+    @classmethod
+    def from_request(cls, request):
+        """ Build the serializer from the ``Upload-Offset``, ``Content-Length`` and ``Upload-Checksum`` headers """
+        return cls(data={
+            'offset': request.headers.get('Upload-Offset'),
+            'content_length': request.META.get('CONTENT_LENGTH') or None,
+            'checksum': request.headers.get('Upload-Checksum', ''),
+        })
+
+    def validate_checksum(self, value):
+        """ Accept the tus form ``sha256 <base64 digest>`` and return the digest as hex """
+        if not value:
+            return ''
+        algorithm, _, encoded = value.partition(' ')
+        try:
+            digest = base64.b64decode(encoded.strip(), validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise serializers.ValidationError('Upload-Checksum must be "sha256 <base64 digest>".') from exc
+        if algorithm.lower() != 'sha256' or len(digest) != 32:
+            raise serializers.ValidationError('Upload-Checksum must be "sha256 <base64 digest>".')
+        return digest.hex()
+
+
+class UploadSessionSerializer(serializers.ModelSerializer):
+    """ Representation of an upload session. ``offset`` is the confirmed, disk-reconciled resume position """
+    offset = serializers.SerializerMethodField()
+    video_asset_id = serializers.IntegerField(read_only=True)
+    upload_status = serializers.CharField(source='status', read_only=True)
+    chunk_size = serializers.SerializerMethodField()
+    max_chunk_size = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UploadSession
+        fields = (
+            'id', 'filename', 'file_size', 'offset', 'upload_status', 'error_code', 'video_asset_id', 'expires_at',
+            'chunk_size', 'max_chunk_size',
+        )
+        read_only_fields = fields
+
+    @staticmethod
+    def get_offset(session) -> int:
+        """ Committed bytes the client does not need to send again """
+        return confirmed_offset(session)
+
+    @staticmethod
+    def get_chunk_size(session) -> int:  # pylint: disable=unused-argument
+        """ Chunk size the client should use """
+        return settings.RESUMABLE_UPLOAD_CHUNK_BYTES
+
+    @staticmethod
+    def get_max_chunk_size(session) -> int:  # pylint: disable=unused-argument
+        """ Largest chunk the server accepts """
+        return settings.RESUMABLE_UPLOAD_MAX_CHUNK_BYTES
