@@ -1,18 +1,20 @@
 from drf_spectacular.utils import extend_schema
 from rest_framework.exceptions import ValidationError
-from rest_framework.generics import ListAPIView
+from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.base_user import AbstractBaseUser
 from django.db.models import Q
 
 from arbisoft_sessions_portal.services.google.google_user_info import GoogleUserInfoService
 from users.permissions import IsStaffPermission
-from users.v1.serializers import EmailLoginSerializer, LoginUserSerializer, UserSearchSerializer
+from users.v1.serializers import CurrentUserSerializer, EmailLoginSerializer, LoginUserSerializer, UserSearchSerializer
 
 user_model = get_user_model()
 
@@ -232,3 +234,25 @@ class UserSearchView(ListAPIView):
         return user_model.objects.filter(
             Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(email__icontains=q)
         ).order_by('first_name')[:20]
+
+
+class CurrentUserView(RetrieveAPIView):
+    """
+    View for retrieving the authenticated user, used by clients to verify their Bearer token.
+    Session auth is excluded because the endpoint is a pure Bearer-token validity probe.
+    """
+
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    serializer_class = CurrentUserSerializer
+
+    def get_object(self) -> AbstractBaseUser:
+        return self.request.user
+
+    @extend_schema(
+        responses={200: CurrentUserSerializer},
+        description="Validate the Bearer access token and return the authenticated user's basic information",
+    )
+    def get(self, request, *args, **kwargs) -> Response:
+        """ Get the authenticated user """
+        return super().get(request, *args, **kwargs)
