@@ -7,6 +7,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.base import File
 from django.core.files.storage import FileSystemStorage
+from django.core.validators import FileExtensionValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -20,6 +21,10 @@ video_storage = FileSystemStorage(
 thumbnail_storage = FileSystemStorage(
     location=settings.MEDIA_ROOT / 'thumbnails',
     base_url=settings.MEDIA_URL + 'thumbnails/'
+)
+captions_storage = FileSystemStorage(
+    location=settings.MEDIA_ROOT / 'captions',
+    base_url=settings.MEDIA_URL + 'captions/'
 )
 
 
@@ -86,11 +91,18 @@ class VideoAsset(models.Model):
 
     event = models.ForeignKey(Event, on_delete=models.DO_NOTHING, related_name='videos', null=True, blank=True)
     title = models.CharField(max_length=255)
-    video_file = models.FileField(storage=video_storage, null=True, blank=True)
+    video_file = models.FileField(
+        storage=video_storage,
+        null=True,
+        blank=True,
+        validators=[FileExtensionValidator(["mp4", "mov", "avi", "webm"])],
+    )
     duration = models.IntegerField(default=0)  # in seconds
     thumbnail = models.ImageField(storage=thumbnail_storage, null=True, blank=True)
     status = models.CharField(max_length=20, choices=VideoStatus.choices)
+    captions_file = models.FileField(storage=captions_storage, null=True, blank=True)
     file_size = models.BigIntegerField(default=0)  # in bytes
+    view_count = models.PositiveIntegerField(default=0)
     created = models.DateTimeField(auto_now_add=True)
     modified = models.DateTimeField(auto_now=True)
 
@@ -136,7 +148,10 @@ class VideoAsset(models.Model):
             except ValueError:
                 logger.error("Invalid duration value, unable to convert to float.")
 
-        super().save(*args, **kwargs)
+            # Always UPDATE on the second save — never re-INSERT
+            super().save(update_fields=['file_size', 'duration', 'thumbnail'])
+        else:
+            super().save(*args, **kwargs)
 
     def file_size_mb(self):
         """

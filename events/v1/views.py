@@ -1,13 +1,26 @@
-from rest_framework.generics import ListAPIView, RetrieveAPIView
+from drf_spectacular.utils import extend_schema, extend_schema_view
+from rest_framework.generics import CreateAPIView, ListAPIView, ListCreateAPIView, RetrieveAPIView
+from rest_framework.parsers import JSONParser, MultiPartParser
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from django.db.models import F, Max
 from django.shortcuts import get_object_or_404
 
 from events.models import Event, Playlist, Tag, VideoAsset
 from events.v1.filters import EventFilter, PlaylistFilter, TagFilter
 from events.v1.pagination import CustomPageNumberPagination
-from events.v1.serializers import EventSerializer, PlaylistListSerializer, TagListSerializer, VideoAssetSerializer
+from events.v1.serializers import (
+    EventCreateSerializer,
+    EventSerializer,
+    PlaylistListSerializer,
+    TagListSerializer,
+    VideoAssetCreateSerializer,
+    VideoAssetSerializer,
+)
 from events.v1.utils import get_similar_events
+from users.permissions import IsStaffPermission
 
 
 class EventsListView(ListAPIView):
@@ -32,19 +45,45 @@ class VideoAssetDetailView(RetrieveAPIView):
         return obj
 
 
-class TagListView(ListAPIView):
-    """ View for listing all tags """
+class VideoAssetIncrementViewCountView(APIView):
+    """ Increment view count for a VideoAsset by 1 """
 
-    queryset = Tag.objects.all()
+    def post(self, request, event_slug, *args, **kwargs):
+        """
+        Atomically increment the view count and return the value read back after the update.
+
+        A queryset update is used because VideoAsset.save() runs ffmpeg processing.
+        """
+        video_asset_id = get_object_or_404(VideoAsset.objects.values_list('pk', flat=True), event__slug=event_slug)
+
+        queryset = VideoAsset.objects.filter(pk=video_asset_id)
+        queryset.update(view_count=F('view_count') + 1)
+        return Response({'view_count': queryset.values_list('view_count', flat=True).get()})
+
+
+class TagListView(ListCreateAPIView):
+    """ View for listing and creating tags """
+
+    queryset = Tag.objects.annotate(
+        latest_event=Max('events__event_time')
+    ).order_by(F('latest_event').desc(nulls_last=True))
     serializer_class = TagListSerializer
     pagination_class = None
     filterset_class = TagFilter
+
+    def get_permissions(self):
+        """ Listing tags is open to any authenticated user, creating one is staff only """
+        if self.request.method == 'POST':
+            return [IsAuthenticated(), IsStaffPermission()]
+        return super().get_permissions()
 
 
 class PlaylistListView(ListAPIView):
     """ View for listing all playlists """
 
-    queryset = Playlist.objects.all()
+    queryset = Playlist.objects.annotate(
+        latest_event=Max('events__event_time')
+    ).order_by(F('latest_event').desc(nulls_last=True))
     serializer_class = PlaylistListSerializer
     pagination_class = None
     filterset_class = PlaylistFilter
@@ -63,3 +102,20 @@ class EventRecommendationsView(APIView):
 
         serializer = EventSerializer(paginated_events, many=True)
         return paginator.get_paginated_response(serializer.data)
+
+
+class VideoAssetCreateView(CreateAPIView):
+    """ View for uploading a new video asset (staff only) """
+
+    permission_classes = [IsAuthenticated, IsStaffPermission]
+    serializer_class = VideoAssetCreateSerializer
+    parser_classes = [MultiPartParser]
+
+
+@extend_schema_view(post=extend_schema(responses={201: EventSerializer}))
+class EventCreateView(CreateAPIView):
+    """ View for creating an event with metadata (staff only) """
+
+    permission_classes = [IsAuthenticated, IsStaffPermission]
+    serializer_class = EventCreateSerializer
+    parser_classes = [MultiPartParser, JSONParser]
