@@ -74,6 +74,21 @@ services:
     networks:
       - asp-network
 
+  celery-beat:
+    container_name: celery-beat
+    restart: always
+    build:
+      context: .
+      target: app
+    command: celery -A arbisoft_sessions_portal beat -l info -s /tmp/celerybeat-schedule
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    networks:
+      - asp-network
+
   lint:
     profiles:
       - dev
