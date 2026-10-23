@@ -71,6 +71,10 @@ DJANGO_DEBUG=<django debug flag>
 | `DJANGO_DEBUG` | `settings/base.py` | Any non-empty value, including `False`, turns debug on. Leave it unset to turn it off. `ALLOWED_HOSTS` is empty, so `runserver` refuses to start with debug off: set it for local development. Debug also serves `/media/` files |
 | `DJANGO_PORT` | `docker-compose.yml` only | Port that `runserver` binds and that the `django` container publishes. With Option 1, `runserver` uses its own default (8000) |
 | `RESUMABLE_UPLOAD_*` | `settings/base.py` | Optional limits and locations for resumable uploads (file size, chunk size, session TTL, partial-file directory). Defaults and meaning are in the Settings table of [UPLOADS.md](UPLOADS.md) |
+| `SENTRY_DSN` | `settings/base.py` | Sentry error reporting is off when this is unset. Initialised by `arbisoft_sessions_portal/sentry.py` when the project package is imported (web, Celery worker and beat, `manage.py`), from the final `settings.SENTRY_DSN`, so `settings/local.py` can override it and `settings/test.py` sets it to `None` (tests never create a client) |
+| `SENTRY_ENVIRONMENT` | `settings/base.py` | Optional environment name shown in Sentry (for example `production`) |
+| `SENTRY_TRACES_SAMPLE_RATE` | `settings/base.py` | Fraction of requests and tasks traced, from `0.0` to `1.0`. Defaults to `0.0` |
+| `SENTRY_PROFILE_SESSION_SAMPLE_RATE` | `settings/base.py` | Fraction of sessions profiled, from `0.0` to `1.0`. Defaults to `0.0` |
 
 Do not commit `.env` or `local.py`; both are gitignored.
 

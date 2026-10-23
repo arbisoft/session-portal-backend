@@ -12,8 +12,9 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 import os
 
 from datetime import timedelta
-from dotenv import load_dotenv
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -267,6 +268,12 @@ LOGGING = {
         },
     },
 }
+
+# Error monitoring; the client is initialised in EventsConfig.ready().
+SENTRY_DSN = os.getenv("SENTRY_DSN")
+SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT")
+SENTRY_TRACES_SAMPLE_RATE = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE") or 0.0)
+SENTRY_PROFILE_SESSION_SAMPLE_RATE = float(os.getenv("SENTRY_PROFILE_SESSION_SAMPLE_RATE") or 0.0)
 
 
 try:
