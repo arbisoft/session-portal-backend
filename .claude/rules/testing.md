@@ -19,7 +19,7 @@ pytest events/tests/test_apis.py::TestClassName::test_name  # single test
 
 ## Organization
 
-- Tests live in `<app>/tests/`: `test_apis.py`, `test_staff_apis.py`, `test_filters.py`, `test_forms.py`, `test_tasks.py`, `test_uploads.py` and `test_upload_endpoints.py` (resumable uploads; split because pylint caps a module at 1000 lines). Extend the matching file before creating a new one.
+- Tests live in `<app>/tests/`: `test_apis.py`, `test_staff_apis.py`, `test_filters.py`, `test_forms.py`, `test_tasks.py`, `test_uploads.py`, `test_upload_endpoints.py` and `test_upload_cleanup.py` (resumable uploads; split because pylint caps a module at 1000 lines). Extend the matching file before creating a new one.
 - Test method names are snake_case and at most 50 characters. This is a house convention: pylint's default naming (3.3.3) has no upper bound and `pylintrc` sets no `method-rgx`, so CI does not catch a longer name.
 - Descriptive names that explain the scenario.
 
