@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Django 4.2 + DRF backend for Arbisoft's internal "Sessions Portal" (recorded sessions/events with video, tags, playlists, presenters). Python 3.12, PostgreSQL required (uses `django.contrib.postgres` trigram search, so SQLite won't work). Celery + Redis are used for Google Drive video imports and for finalizing resumable uploads.
+Django 5.2 + DRF backend for Arbisoft's internal "Sessions Portal" (recorded sessions/events with video, tags, playlists, presenters). Python 3.12, PostgreSQL required (uses `django.contrib.postgres` trigram search, so SQLite won't work). Celery + Redis are used for Google Drive video imports and for finalizing resumable uploads.
 
 ## Commands
 

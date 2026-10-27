@@ -224,7 +224,7 @@ class UploadSession(models.Model):
 
     class Meta:
         constraints = [
-            models.CheckConstraint(check=models.Q(file_size__gt=0), name='upload_session_file_size_positive'),
+            models.CheckConstraint(condition=models.Q(file_size__gt=0), name='upload_session_file_size_positive'),
             models.CheckConstraint(
                 check=models.Q(offset__gte=0, offset__lte=models.F('file_size')),
                 name='upload_session_offset_within_file',
