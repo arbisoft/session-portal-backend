@@ -110,7 +110,7 @@ def finalize_upload_session(session_id):
     """
     Verify and register a fully uploaded file. Idempotent, so redelivery and the stale-finalization sweep are safe.
 
-    Storage errors are retried with backoff. Anything else leaves the session FINALIZING for the sweep to re-queue.
+    Storage errors are retried with backoff. Anything else leaves the session FINALIZING for the sweep to re-queue until it times out.
     """
     session = finalize_session(session_id)
     return session.status if session else None

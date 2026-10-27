@@ -41,6 +41,7 @@ CHUNK_CONTENT_TYPE = "application/offset+octet-stream"
 READ_BLOCK_BYTES = 1024 * 1024
 SIGNATURE_BYTES = 12
 ORPHAN_GRACE_SECONDS = 3600
+FINALIZE_TIMEOUT_ERROR = "finalize_timeout"
 QUICKTIME_ATOMS = (b"ftyp", b"moov", b"mdat", b"free", b"wide", b"skip", b"pnot")
 WEBM_MAGIC = b"\x1a\x45\xdf\xa3"
 LOCK_NOT_AVAILABLE_SQLSTATE = "55P03"
@@ -457,6 +458,14 @@ def _fail_session(session: UploadSession, error_code: str) -> None:
     logger.error("upload_session_failed session=%s reason=%s", session.id, error_code)
 
 
+def _remove_promoted_file(session: UploadSession) -> None:
+    """ Drop the file a crashed finalization already moved into the video storage, as no asset references it """
+    try:
+        Path(asset_video_storage().path(final_storage_name(session))).unlink(missing_ok=True)
+    except OSError:
+        logger.exception("upload_promoted_remove_failed session=%s", session.id)
+
+
 def _promote_file(session: UploadSession, source: Path) -> str:
     """ Move the finished file into the video storage under its deterministic name """
     name = final_storage_name(session)
@@ -526,6 +535,24 @@ def _expire_sessions(now) -> int:
     return expired
 
 
+def _fail_stuck_finalizations(now) -> int:
+    """ Fail sessions that stayed FINALIZING past the deadline, so a poison session is not re-queued forever """
+    cutoff = now - timedelta(hours=settings.RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS)
+    stuck = UploadSession.objects.filter(status=UploadSession.UploadStatus.FINALIZING, modified__lte=cutoff)
+    failed = 0
+    for session_id in list(stuck.values_list("pk", flat=True)):
+        with transaction.atomic():
+            session = UploadSession.objects.select_for_update(skip_locked=True).filter(
+                pk=session_id, status=UploadSession.UploadStatus.FINALIZING, modified__lte=cutoff
+            ).first()
+            if session is None:
+                continue
+            _fail_session(session, FINALIZE_TIMEOUT_ERROR)
+            transaction.on_commit(partial(_remove_promoted_file, session))
+            failed += 1
+    return failed
+
+
 def _redispatch_stalled_finalizations(now) -> int:
     cutoff = now - timedelta(minutes=settings.RESUMABLE_UPLOAD_FINALIZE_STALE_MINUTES)
     stalled = UploadSession.objects.filter(status=UploadSession.UploadStatus.FINALIZING, modified__lte=cutoff)
@@ -564,10 +591,11 @@ def _remove_orphan_parts(now) -> int:
 
 
 def cleanup_sessions() -> dict:
-    """ Expire abandoned sessions, restart stalled finalizations, purge old rows and sweep orphaned partial files """
+    """ Expire abandoned sessions, fail or restart stalled finalizations, purge old rows, sweep orphaned files """
     now = timezone.now()
     summary = {
         "expired": _expire_sessions(now),
+        "finalizations_failed": _fail_stuck_finalizations(now),
         "finalizations_redispatched": _redispatch_stalled_finalizations(now),
         "purged": _purge_old_sessions(now),
         "orphan_files_removed": _remove_orphan_parts(now),

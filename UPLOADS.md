@@ -47,7 +47,7 @@ Errors are `{"code": ..., "detail": ...}` plus context. Codes the client acts on
 - Crash after the write but before the commit: the file is longer than the committed offset. The next writer truncates the surplus. The client is never told those bytes were accepted.
 - Metadata ahead of disk (partial file lost or shortened): `GET` reports `min(committed offset, bytes on disk)`, and the next `PATCH` lowers the stored offset and answers `offset_mismatch` with the true value.
 - Lost acknowledgement: the chunk is committed, the client did not hear. Its retry gets `409 offset_mismatch` with the new offset, and the client continues from there. Bytes are never appended twice.
-- Finalization (Celery task `events.tasks.finalize_upload_session`) checks the size, the container signature and, if given, the whole-file SHA-256; moves the file to `videos/<session id>.<ext>`; creates the `VideoAsset` (`READY` when ffmpeg finds a duration, otherwise the session fails with `processing_failed`). It is idempotent: the destination name is deterministic, the asset row and the session update commit together, and concurrent runs skip a locked row. Storage errors are retried with backoff; if a worker dies, `cleanup_upload_sessions` re-queues sessions stuck in `FINALIZING`.
+- Finalization (Celery task `events.tasks.finalize_upload_session`) checks the size, the container signature and, if given, the whole-file SHA-256; moves the file to `videos/<session id>.<ext>`; creates the `VideoAsset` (`READY` when ffmpeg finds a duration, otherwise the session fails with `processing_failed`). It is idempotent: the destination name is deterministic, the asset row and the session update commit together, and concurrent runs skip a locked row. Storage errors are retried with backoff; if a worker dies, `cleanup_upload_sessions` re-queues sessions stuck in `FINALIZING`, and fails them with `finalize_timeout` once they pass `RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS`.
 - Failed verification (`size_mismatch`, `checksum_mismatch`, `invalid_file_signature`) deletes the partial file and fails the session; the client must start a new one.
 
 ## Security
@@ -73,11 +73,12 @@ All read from the environment (see `settings/base.py`).
 | `RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER` | 3 | Soft limit. |
 | `RESUMABLE_UPLOAD_MIN_FREE_BYTES` | 1 GiB | Free space kept in reserve. An upload is refused (`507 insufficient_storage`) unless free space, minus space promised to other sessions, minus this reserve, exceeds the file size. Raise it on production hosts. |
 | `RESUMABLE_UPLOAD_FINALIZE_STALE_MINUTES` | 30 | A `FINALIZING` session older than this is re-queued by the sweep. |
+| `RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS` | 6 | A session still `FINALIZING` after this is marked `FAILED` with `error_code` `finalize_timeout` instead of being re-queued again, and its files are removed. |
 | `RESUMABLE_UPLOAD_RETENTION_DAYS` | 7 | Closed sessions are purged after this. |
 
 ## Cleanup
 
-`python manage.py cleanup_upload_sessions` (or the Celery task `events.tasks.cleanup_upload_sessions`) expires sessions past their TTL, re-queues stalled finalizations, deletes old closed rows and removes partial files that no active session owns (older than one hour). `CELERY_BEAT_SCHEDULE` in `settings/base.py` runs the task hourly, and the `celery-beat` service in `docker-compose.yml` starts the scheduler. Outside Docker, run `celery -A arbisoft_sessions_portal beat -l info` next to the worker, or call the management command hourly from cron. Run only one beat process.
+`python manage.py cleanup_upload_sessions` (or the Celery task `events.tasks.cleanup_upload_sessions`) expires sessions past their TTL, re-queues stalled finalizations (and fails those stuck past `RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS`), deletes old closed rows and removes partial files that no active session owns (older than one hour). `CELERY_BEAT_SCHEDULE` in `settings/base.py` runs the task hourly, and the `celery-beat` service in `docker-compose.yml` starts the scheduler. Outside Docker, run `celery -A arbisoft_sessions_portal beat -l info` next to the worker, or call the management command hourly from cron. Run only one beat process.
 
 ## Infrastructure limits to check
 
