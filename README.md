@@ -183,6 +183,8 @@ CELERY_BROKER_URL = "redis://localhost:6379/0"
 CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
 ```
 
+Throttle counters (including the upload rates) are kept in the Django cache, which `settings/base.py` points at Redis db 1 so every web worker shares them. The default is `redis://redis:6379/1`; set `REDIS_CACHE_URL` (for example `redis://localhost:6379/1`) outside Docker. The test settings use an in-process cache instead.
+
 ### Run tests
 The tests need a reachable PostgreSQL. They read the `DB_*` variables from the environment and from `.env`, so with the `.env` above they connect with your own credentials and Django creates a separate `test_<DB_NAME>` database. If `DB_*` is not set anywhere (as in CI), they fall back to `testuser` / `testpassword` on `localhost:5432` with database `testdb`.
 ```bash

@@ -21,6 +21,8 @@ AUTH_PASSWORD_VALIDATORS = []
 
 CELERY_BROKER_URL = 'memory://'
 
+CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
+
 class DisableMigrations:
     def __contains__(self, item):
         return True
