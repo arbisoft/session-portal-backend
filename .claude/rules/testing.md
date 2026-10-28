@@ -19,14 +19,14 @@ pytest events/tests/test_apis.py::TestClassName::test_name  # single test
 
 ## Organization
 
-- Tests live in `<app>/tests/`: `test_apis.py`, `test_staff_apis.py`, `test_filters.py`, `test_forms.py`, `test_tasks.py`. Extend the matching file before creating a new one.
+- Tests live in `<app>/tests/`: `test_apis.py`, `test_staff_apis.py`, `test_filters.py`, `test_forms.py`, `test_tasks.py`, `test_uploads.py`, `test_upload_endpoints.py` and `test_upload_cleanup.py` (resumable uploads; split because pylint caps a module at 1000 lines). Extend the matching file before creating a new one.
 - Test method names are snake_case and at most 50 characters. This is a house convention: pylint's default naming (3.3.3) has no upper bound and `pylintrc` sets no `method-rgx`, so CI does not catch a longer name.
 - Descriptive names that explain the scenario.
 
 ## Fixtures and Data
 
 - Use the `factory_boy` factories in `events/factories.py` and `users/factories.py`, not raw `Model.objects.create` or JSON fixtures.
-- Existing fixtures in `events/tests/conftest.py`: `staff_client`, `user_client`, `media_storage`. Reuse them.
+- Existing fixtures in `events/tests/conftest.py`: `staff_client`, `user_client`, `other_staff_client`, `media_storage`, and for uploads `upload_root` and `session_for` (the throttle cache is cleared automatically). Reuse them.
 - Tests that upload files must use `media_storage` so files land in a tmp dir, not `MEDIA_ROOT`.
 - The `Event` slug signal is disconnected for every test (autouse), so factories must set `slug` explicitly.
 - Do not call real Google APIs or Celery brokers. Mock the HTTP layer (`responses` is installed) and use the `memory://` broker from test settings.
