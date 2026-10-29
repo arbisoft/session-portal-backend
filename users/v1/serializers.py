@@ -26,6 +26,14 @@ class UserSearchSerializer(serializers.ModelSerializer):
         fields = ('id', 'first_name', 'last_name', 'full_name', 'email')
 
     @staticmethod
-    def get_full_name(obj):
-        """ Get the full name of a user """
-        return f"{obj.first_name} {obj.last_name}".strip()
+    def get_full_name(obj) -> str:
+        """ Full name of the user, falling back to the email because Google-created usernames are synthesized """
+        return obj.get_full_name() or obj.email
+
+
+class CurrentUserSerializer(UserSearchSerializer):
+    """ Serializer for the authenticated user's basic information """
+
+    class Meta(UserSearchSerializer.Meta):
+        fields = UserSearchSerializer.Meta.fields + ('is_staff',)
+        read_only_fields = fields
