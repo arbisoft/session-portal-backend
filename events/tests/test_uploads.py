@@ -705,6 +705,18 @@ class TestUploadFinalization:
         assert result.error_code == 'size_mismatch'
         assert not VideoAsset.objects.exists()
 
+    def test_finalize_fails_when_part_file_missing(self, staff_client, session_for, caplog):
+        """ A worker that cannot see the partial file fails the session and logs why """
+        session = self.finished_session(staff_client, session_for, make_video(500))
+        part_path(session.id).unlink()
+
+        with caplog.at_level('ERROR', logger='asp_api'):
+            result = finalize_session(session.id)
+
+        assert result.status == UploadSession.UploadStatus.FAILED
+        assert result.error_code == 'size_mismatch'
+        assert f'upload_file_missing session={session.id}' in caplog.text
+
     def test_whole_file_checksum_is_verified(self, staff_client, session_for):
         """ A mismatching whole-file checksum fails the session """
         session = self.finished_session(

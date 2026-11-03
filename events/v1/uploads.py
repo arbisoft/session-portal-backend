@@ -440,7 +440,16 @@ def _source_file(session: UploadSession) -> Optional[Path]:
 
 def _verification_failure(session: UploadSession, source: Optional[Path]) -> str:
     """ Error code describing why the assembled file is unusable, or an empty string when it is sound """
-    if source is None or source.stat().st_size != session.file_size:
+    if source is None:
+        logger.error(
+            "upload_file_missing session=%s expected=%d part_root=%s", session.id, session.file_size, upload_root()
+        )
+        return "size_mismatch"
+    if source.stat().st_size != session.file_size:
+        logger.error(
+            "upload_size_mismatch session=%s expected=%d on_disk=%d", session.id, session.file_size,
+            source.stat().st_size,
+        )
         return "size_mismatch"
     with open(source, "rb") as handle:
         if not has_valid_signature(handle.read(SIGNATURE_BYTES), file_extension(session.filename)):
