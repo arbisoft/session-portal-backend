@@ -486,12 +486,8 @@ def _promote_file(session: UploadSession, source: Path) -> str:
 
 
 def _create_asset(session: UploadSession, storage_name: str) -> VideoAsset:
-    """ Create the asset as ``VideoAssetCreateSerializer`` does: PROCESSING, then READY once a duration was found """
-    title = os.path.splitext(session.filename)[0][:255]
-    asset = VideoAsset.objects.create(title=title, video_file=storage_name, status=VideoAsset.VideoStatus.PROCESSING)
-    asset.status = VideoAsset.VideoStatus.READY if asset.duration > 0 else VideoAsset.VideoStatus.FAILED
-    VideoAsset.objects.filter(pk=asset.pk).update(status=asset.status)
-    return asset
+    """ Create the asset for a promoted file: READY once a duration was found, otherwise FAILED """
+    return VideoAsset.create_with_status(os.path.splitext(session.filename)[0][:255], storage_name)
 
 
 def finalize_session(session_id: UUID) -> Optional[UploadSession]:

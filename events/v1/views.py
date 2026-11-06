@@ -173,11 +173,14 @@ class UploadSessionView(APIView):
     """ Base for the staff-only resumable upload endpoints, throttled per HTTP method """
 
     permission_classes = [IsAuthenticated, IsStaffPermission]
-    throttle_scope = None
     throttle_scopes = {}
 
+    @property
+    def throttle_scope(self):
+        """ Scope read by ``ScopedRateThrottle`` for the current HTTP method """
+        return self.throttle_scopes.get(self.request.method)
+
     def get_throttles(self):
-        self.throttle_scope = self.throttle_scopes.get(self.request.method)
         return [ScopedRateThrottle()] if self.throttle_scope else []
 
 

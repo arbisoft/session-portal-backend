@@ -133,23 +133,10 @@ class VideoAssetCreateSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        """
-        Create the asset and mark it READY or FAILED.
-
-        VideoAsset.save() probes the file and extracts the thumbnail synchronously, logging ffmpeg failures instead
-        of raising, which leaves the duration at 0. The status is written with update() so it is not processed twice.
-        """
+        """ Create the asset and mark it READY or FAILED """
         filename = validated_data['video_file'].name
         title = os.path.splitext(os.path.basename(filename))[0]
-
-        video_asset = VideoAsset.objects.create(
-            title=title,
-            video_file=validated_data['video_file'],
-            status=VideoAsset.VideoStatus.PROCESSING,
-        )
-        video_asset.status = VideoAsset.VideoStatus.READY if video_asset.duration > 0 else VideoAsset.VideoStatus.FAILED
-        VideoAsset.objects.filter(pk=video_asset.pk).update(status=video_asset.status)
-        return video_asset
+        return VideoAsset.create_with_status(title, validated_data['video_file'])
 
 
 class EventCreateSerializer(serializers.ModelSerializer):
@@ -233,7 +220,7 @@ class EventCreateSerializer(serializers.ModelSerializer):
         return EventSerializer(instance, context=self.context).data
 
 
-class UploadSessionCreateSerializer(serializers.Serializer):  # pylint: disable=abstract-method
+class UploadSessionCreateSerializer(serializers.Serializer):
     """ Validates the request that starts a resumable upload """
     filename = serializers.CharField(max_length=255)
     file_size = serializers.IntegerField(min_value=1)
@@ -257,7 +244,7 @@ class UploadSessionCreateSerializer(serializers.Serializer):  # pylint: disable=
         return value.lower()
 
 
-class UploadChunkHeadersSerializer(serializers.Serializer):  # pylint: disable=abstract-method
+class UploadChunkHeadersSerializer(serializers.Serializer):
     """ Validates the headers of a chunk request. The chunk bytes themselves are streamed, never parsed """
     offset = serializers.IntegerField(min_value=0)
     content_length = serializers.IntegerField(min_value=1)
@@ -291,8 +278,8 @@ class UploadSessionSerializer(serializers.ModelSerializer):
     offset = serializers.SerializerMethodField()
     video_asset_id = serializers.IntegerField(read_only=True)
     upload_status = serializers.CharField(source='status', read_only=True)
-    chunk_size = serializers.SerializerMethodField()
-    max_chunk_size = serializers.SerializerMethodField()
+    chunk_size = serializers.IntegerField(read_only=True, help_text='Chunk size the client should use')
+    max_chunk_size = serializers.IntegerField(read_only=True, help_text='Largest chunk the server accepts')
 
     class Meta:
         model = UploadSession
@@ -307,12 +294,9 @@ class UploadSessionSerializer(serializers.ModelSerializer):
         """ Committed bytes the client does not need to send again """
         return confirmed_offset(session)
 
-    @staticmethod
-    def get_chunk_size(session) -> int:  # pylint: disable=unused-argument
-        """ Chunk size the client should use """
-        return settings.RESUMABLE_UPLOAD_CHUNK_BYTES
-
-    @staticmethod
-    def get_max_chunk_size(session) -> int:  # pylint: disable=unused-argument
-        """ Largest chunk the server accepts """
-        return settings.RESUMABLE_UPLOAD_MAX_CHUNK_BYTES
+    def to_representation(self, instance):
+        """ Add the chunk limits, which come from settings rather than from the session """
+        data = super().to_representation(instance)
+        data['chunk_size'] = settings.RESUMABLE_UPLOAD_CHUNK_BYTES
+        data['max_chunk_size'] = settings.RESUMABLE_UPLOAD_MAX_CHUNK_BYTES
+        return data

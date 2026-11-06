@@ -156,6 +156,19 @@ class VideoAsset(models.Model):
         else:
             super().save(*args, **kwargs)
 
+    @classmethod
+    def create_with_status(cls, title, video_file):
+        """
+        Create an asset from an uploaded file or a storage name and mark it READY or FAILED.
+
+        save() probes the file and extracts the thumbnail synchronously, logging ffmpeg failures instead of raising,
+        which leaves the duration at 0. The status is written with update() so the file is not processed twice.
+        """
+        asset = cls.objects.create(title=title, video_file=video_file, status=cls.VideoStatus.PROCESSING)
+        asset.status = cls.VideoStatus.READY if asset.duration > 0 else cls.VideoStatus.FAILED
+        cls.objects.filter(pk=asset.pk).update(status=asset.status)
+        return asset
+
     def file_size_mb(self):
         """
         Returns the file size in MB, formatted to two decimal places.
