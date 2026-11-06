@@ -1,8 +1,15 @@
+---
+paths:
+  - "events/**/*.py"
+  - "users/**/*.py"
+  - "arbisoft_sessions_portal/**/*.py"
+---
+
 # Backend — Django Rules
 
 ## Layout
 
-- Each app exposes a versioned API under `<app>/v1/` (`serializers.py`, `views.py`, `urls.py`; `events` also has `filters.py`, `pagination.py`, `utils.py`).
+- Each app exposes a versioned API under `<app>/v1/` (`serializers.py`, `views.py`, `urls.py`; `events` also has `filters.py`, `pagination.py`, `utils.py`, `uploads.py`, `streaming.py`).
 - A new API version is a sibling package (`v2/`), never an edit that changes the contract of `v1`.
 - Shared permission classes live in `users/permissions.py` (`IsStaffPermission`), including for `events` endpoints.
 
@@ -15,13 +22,14 @@
 - Use `get_object_or_404()` — no manual `try: .get() except DoesNotExist`.
 - Use generic DRF views (`ListAPIView`, `CreateAPIView`, ...) for CRUD, `APIView` for one-off endpoints.
 - Query-param filtering belongs in a `django_filters` `FilterSet` (`events/v1/filters.py`). When a view needs a bare param, validate it through a serializer instead of `request.query_params.get()` + manual casting.
+- Annotate every endpoint with `drf_spectacular` `@extend_schema` (precedent: `events/v1/views.py`) so `/api/schema/` stays accurate; the web client's TypeScript models are maintained by hand from it.
 - Every view is covered by the global `IsAuthenticated` default. Opt out (`permission_classes = []`) only for login endpoints. Staff-only endpoints add `IsStaffPermission` explicitly.
 
 ## Query Optimization
 
 - `select_related()` for ForeignKey / OneToOne, `prefetch_related()` for M2M / reverse FK. Check serializers and properties, not just the view.
 - No N+1 — `SerializerMethodField`s and model properties must use prefetched data (`.all()`, not `.filter()`). See the `django-query-optimisation` skill.
-- Event list/detail endpoints traverse `creator`, `tags`, `playlists`, `presenters`, and the reverse `videos` relation; any new field on them needs matching `select_related`/`prefetch_related`. `.first()` and `.filter()` on a related manager bypass the prefetch cache.
+- Event list/detail endpoints traverse `creator`, `tags`, `playlists`, `presenters`, and the reverse `videos` relation; any new field on them needs matching `select_related`/`prefetch_related`. `Event.objects.with_card_data()` (`EventQuerySet` in `events/models.py`) owns that prefetch set: build every queryset that feeds `EventSerializer` from it and extend it when a serializer field is added. `.first()` and `.filter()` on a related manager bypass the prefetch cache; read the prefetched `.all()` instead (precedent: `Event.first_video`, `Event.playable_video`).
 - `bulk_create()` / `bulk_update()` for batches — never loop-save.
 - `.only()` / `.defer()` or `values()` on hot paths when full rows are not needed (see `VideoAssetIncrementViewCountView`).
 - `QuerySet.update()` when touching columns on a `VideoAsset` without needing ffmpeg: `VideoAsset.save()` runs ffmpeg whenever `video_file` is set.
@@ -30,7 +38,7 @@
 
 - Serializers handle validation and representation only — no side effects (emails, writes to other models).
 - Separate serializers for list / detail / create when field sets differ (`EventCreateSerializer`, `VideoAssetCreateSerializer`).
-- Use `read_only_fields`. Never expose passwords, tokens, or internal-only IDs.
+- Use `read_only_fields`.
 - A create/update serializer that writes a field gated by a business rule must enforce the rule in `validate()` / `validate_<field>()`. Permission classes only say whether the caller may hit the endpoint.
 - Do not duplicate validation that belongs in model `clean()` or field validators (e.g. the `VideoAsset.video_file` extension validator).
 
@@ -54,6 +62,9 @@
 
 ## Celery Tasks
 
-- Celery is used only for Google Drive video imports (`events/tasks.py`). Tasks must be idempotent.
+- Celery is used for Google Drive video imports and for resumable-upload finalization and cleanup (`events/tasks.py`). Tasks must be idempotent: the broker is Redis and a task can be redelivered.
+- Dispatch from inside a transaction with `transaction.on_commit(partial(task.delay, ...))` so the worker never sees uncommitted rows (precedent: `events/v1/uploads.py`).
+- Retry transient failures declaratively with `autoretry_for=(...)`, `retry_backoff=True`, `retry_backoff_max`, `max_retries` (precedent: `finalize_upload_session`); do not hand-roll retry loops.
+- Guard state transitions with `select_for_update()` inside `transaction.atomic()`; use `nowait=True` for request paths and `skip_locked=True` for sweepers (precedent: `events/v1/uploads.py`).
 - Use `logging`, not `print()`.
 - Pass IDs to tasks, not model instances.

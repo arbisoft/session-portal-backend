@@ -1,6 +1,6 @@
 ---
 name: task-generator
-description: "Generates implementation-ready tasks (title, description, acceptance criteria) from the current staged or unstaged code changes in the Sessions Portal backend (Django 4.2 + DRF, apps `events` and `users`), categorized as API, Data model, Auth & Permissions, Background jobs, Admin, or Infrastructure. Self-heals its own area-detection path table when the repo's layout has moved on."
+description: "Generates implementation-ready tasks (title, description, acceptance criteria) from the current staged or unstaged code changes in the Sessions Portal backend (Django 5.2 + DRF, apps `events` and `users`), categorized as API, Data model, Auth & Permissions, Background jobs, Admin, or Infrastructure. Self-heals its own area-detection path table when the repo's layout has moved on."
 argument-hint: "Ask to generate tasks from your current changes, or point at a specific diff/commit range/set of files to analyze."
 user-invocable: true
 ---

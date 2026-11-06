@@ -1,3 +1,9 @@
+---
+paths:
+  - "events/**/*.py"
+  - "users/**/*.py"
+---
+
 # SOLID Principles
 
 Applied to this Django + DRF codebase.

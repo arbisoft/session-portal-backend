@@ -72,6 +72,7 @@ Do not flag SOLID on a 10-line utility, a throwaway test helper, or code the dif
 ## Celery
 
 - [ ] Task is idempotent, takes IDs not instances, logs failures with context
+- [ ] Dispatched inside a transaction via `transaction.on_commit`; transient failures use `autoretry_for` + `retry_backoff`, not a hand-rolled loop
 - [ ] Task failure leaves the `VideoAsset` in a visible failed state rather than silently pending
 
 ## Security

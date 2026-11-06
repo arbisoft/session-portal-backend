@@ -1,6 +1,7 @@
 ---
 name: commit-generator
-description: "Analyzes git staged changes in the Sessions Portal backend (Django 4.2 + DRF, apps `events` and `users`), splits unrelated changes into separate logical commits with Conventional Commit messages, actually creates those commits, and generates a PR title + description that follows the repo's PR template. Self-heals its own scope/path table when the repo's layout has moved on."
+disable-model-invocation: true
+description: "Analyzes git staged changes in the Sessions Portal backend (Django 5.2 + DRF, apps `events` and `users`), splits unrelated changes into separate logical commits with Conventional Commit messages, actually creates those commits, and generates a PR title + description that follows the repo's PR template. Self-heals its own scope/path table when the repo's layout has moved on."
 argument-hint: "Provide a brief description of the changes you made, or simply ask to generate a commit message and PR description based on your staged changes."
 user-invocable: true
 ---

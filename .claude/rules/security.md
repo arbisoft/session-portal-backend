@@ -1,3 +1,11 @@
+---
+paths:
+  - "events/**"
+  - "users/**"
+  - "arbisoft_sessions_portal/**"
+  - "requirements/**"
+---
+
 # Security Rules
 
 ## Secrets
@@ -23,8 +31,9 @@
 
 - Never expose passwords, tokens, or internal-only IDs in responses.
 - Error messages must not leak stack traces, file paths, or ffmpeg output to clients.
+- Never return `video_file.url` and never serve videos or `RESUMABLE_UPLOAD_ROOT` from `MEDIA_URL`. Video bytes go through the authenticated `video-asset-stream` view (`events/v1/streaming.py`).
 - `UserSearchView` is staff-only because it lists users — keep the output minimal (no password hashes, permissions, last-login details).
 
 ## High-Scrutiny Surfaces
 
-Pause and confirm with the user before changing: `users/v1/views.py` login flows, `GoogleUserInfoService`, `users/permissions.py`, JWT/CORS/`ALLOWED_HOSTS`/`ALLOW_ONLY_INTERNAL_USERS` settings, and anything that changes who can reach an endpoint.
+The surfaces listed under Conventions in `CLAUDE.md` need user confirmation before any change, as does anything that changes who can reach an endpoint.

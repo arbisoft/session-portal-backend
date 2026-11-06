@@ -20,7 +20,8 @@ Standards live in `.claude/rules/`; checklists in `refs/`. The agents load what 
    - **Migrations** → `*/migrations/*.py` (backend agent applies extra scrutiny)
    - **Tests** → `*/tests/**`
    - **Dependencies / CI** → `requirements/*.txt`, `.github/**`, `Dockerfile`, `docker-compose.yml`
-   - **Docs / config only** → no agents; reply "Docs/config only — no review needed."
+   - **Claude config** → `.claude/**`, `CLAUDE.md` (dispatch `config-maintainer-agent` in `audit` mode)
+   - **Docs only** → no agents; reply "Docs only — no review needed."
 3. For a PR, note the ticket link from the PR description. A missing Taiga link is a **NITPICK** in Impact, not a reason to dispatch.
 4. Resolve mode. Default is **review + auto-fix** (Steps 1–8). It is **review only** (Steps 1–6) when the user says "review only", "don't fix", or passes `--review-only`, or when the scope is a PR whose branch is not checked out.
 
@@ -31,6 +32,7 @@ Standards live in `.claude/rules/`; checklists in `refs/`. The agents load what 
 | Any backend file or migration touched | `backend-reviewer-agent` |
 | Diff adds a new helper-shaped function (≥ 5 lines: formatter, validator, slug/duration/URL helper, query helper, permission check, API wrapper) | `util-reuse-agent` with the candidate list |
 | Any backend file touched | `dead-code-sweep` skill in **review-only mode**, via `subagent_type: general-purpose` |
+| `.claude/**` or `CLAUDE.md` touched | `config-maintainer-agent` in `audit` mode (read-only drift check of the config diff) |
 | `requirements/*.txt` changed | Note in Impact; check the pin against `requirements/base.txt` vs `dev.txt` split yourself |
 
 Detect helper candidates by scanning added `def <name>(...)` lines in `.py` files.
@@ -111,10 +113,16 @@ Runs after the Step 6 review is printed. Skip in review-only mode or when the di
 
 Use the fix-report template in `refs/severity-rules.md`.
 
+## Step 9 — Config follow-up
+
+Runs after Step 8, and in review-only mode runs as `audit`. Skip when the diff is clean and touched no pattern the rules cover.
+
+Dispatch `config-maintainer-agent` (`quick` after auto-fix, `audit` in review-only mode) with the findings and the diff. Ask it whether a finding that recurs, or a pattern the diff introduced, belongs in `.claude/rules/` or the checklist. Append its report as a `## Config follow-up` section; its proposals go to the user, not into the diff.
+
 ## Do NOT
 
 - Do NOT do the review yourself; dispatch and aggregate.
-- Do NOT edit code yourself; fixes go through `backend-agent` and `qa-agent`.
+- Do NOT edit code yourself; fixes go through `backend-agent` and `qa-agent`. Config edits go through `config-maintainer-agent`.
 - Do NOT stage, commit, or push fixes; the user decides.
 - Do NOT auto-fix held items, and do NOT widen a fix beyond its finding.
 - Do NOT serialize dispatches.
