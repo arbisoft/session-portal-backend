@@ -39,7 +39,7 @@ API docs are served at `/api/docs/` (Swagger) and `/api/redoc/`.
 
 ## Architecture
 
-Two Django apps, both exposing a versioned API under `/api/v1/<app>/` with a `v1/` subpackage holding that app's `serializers.py`, `views.py`, `urls.py` (plus `filters.py`, `pagination.py`, `utils.py` in `events`). New API versions should be a sibling package, not edits to `v1`.
+Two Django apps, both exposing a versioned API under `/api/v1/<app>/` with a `v1/` subpackage holding that app's `serializers.py`, `views.py`, `urls.py` (plus `filters.py`, `pagination.py`, `utils.py`, `uploads.py`, `streaming.py` in `events`). New API versions should be a sibling package, not edits to `v1`.
 
 - **`users`** — has no models; uses `django.contrib.auth.User`. Provides login (Google OAuth access token → JWT via `GoogleUserInfoService`, or email/password → JWT) and staff-only user search. `users/permissions.py::IsStaffPermission` is the shared gate for staff-only endpoints, including ones in `events`. Google login rejects accounts whose `hd` isn't `arbisoft.com`/`edly.io` while `ALLOW_ONLY_INTERNAL_USERS` is true.
 - **`events`** — `Event` (has slug, status, tags, playlists, presenters via `EventPresenter`) and `VideoAsset` (file, thumbnail, captions, duration, view_count). Tags/playlists are ordered by their most recent event time.
@@ -54,6 +54,7 @@ Large videos go through `/api/v1/events/videoassets/` (JSON `POST` starts a sess
 
 ### Things that are easy to trip over
 - **`VideoAsset.save()` runs ffmpeg synchronously** whenever `video_file` is set: it saves, probes duration, extracts a thumbnail at ~20% of the duration, then saves again with `update_fields`. ffmpeg errors are logged, not raised, leaving `duration == 0` (`VideoAsset.create_with_status`, used by both upload paths, treats that as `FAILED`). Use `QuerySet.update()` when you only need to touch other columns (as `VideoAssetIncrementViewCountView` and `VideoAsset.create_with_status` do). The `ffmpeg` binary must be installed.
+- **Video bytes are never served from `MEDIA_URL`.** `EventSerializer.video_file` and `VideoAssetSerializer.video_file` return the path of the authenticated `video-asset-stream` route (`events/v1/streaming.py`, Range-aware); don't expose `video_file.url`. Debug mode only serves `/media/thumbnails/` and `/media/captions/`.
 - **Event slugs are set by a `post_save` signal** (`events/signals.py`), appending the id when the title already exists. `events/tests/conftest.py` disconnects it for every test (autouse), so factories set `slug` themselves.
 - **Storages are module-level `FileSystemStorage` instances** built from `MEDIA_ROOT` at import time in `events/models.py` (`videos/`, `thumbnails/`, `captions/`). Tests that upload files must use the `media_storage` fixture, which monkeypatches the `video_file` and `thumbnail` field storage (not `captions_file`) to a tmp dir.
 - **Tests run without migrations** (`settings/test.py` sets `MIGRATION_MODULES = DisableMigrations()`), and `events/tests/conftest.py` creates the `pg_trgm` extension. If you add a Postgres extension or a data migration, tests won't exercise it. Test DB credentials come from `DB_*` env vars, defaulting to `testuser`/`testpassword`@`localhost`.

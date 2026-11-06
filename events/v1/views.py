@@ -8,7 +8,8 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from django.db.models import F, Max
+from django.db.models import F, Max, Prefetch
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 
 from events.models import Event, Playlist, Tag, VideoAsset
@@ -25,6 +26,7 @@ from events.v1.serializers import (
     VideoAssetCreateSerializer,
     VideoAssetSerializer,
 )
+from events.v1.streaming import IgnoreClientContentNegotiation, stream_file_field
 from events.v1.uploads import (
     CHUNK_CONTENT_TYPE,
     ChunkRequest,
@@ -42,7 +44,7 @@ from users.permissions import IsStaffPermission
 class EventsListView(ListAPIView):
     """ View for listing the events """
 
-    queryset = Event.objects.filter(videos__isnull=False)
+    queryset = Event.objects.filter(videos__isnull=False).with_card_data()
     serializer_class = EventSerializer
     pagination_class = CustomPageNumberPagination
     filterset_class = EventFilter
@@ -55,10 +57,40 @@ class VideoAssetDetailView(RetrieveAPIView):
 
     def get_object(self):
         obj = get_object_or_404(
-            VideoAsset.objects.select_related('event__creator').prefetch_related('event__tags', 'event__playlists'),
+            VideoAsset.objects.prefetch_related(Prefetch('event', queryset=Event.objects.with_card_data())),
             event__slug=self.kwargs["event_slug"]
             )
         return obj
+
+
+@extend_schema(
+    responses={
+        (200, 'video/*'): OpenApiTypes.BINARY,
+        (206, 'video/*'): OpenApiTypes.BINARY,
+        416: OpenApiTypes.NONE,
+    },
+    description='Streams the event video to an authenticated caller. Supports HTTP Range requests for seeking.',
+)
+class VideoAssetStreamView(APIView):
+    """ Stream the video file of an event; the only way video bytes leave the server """
+
+    content_negotiation_class = IgnoreClientContentNegotiation
+
+    def get(self, request, event_slug, *args, **kwargs):
+        """
+        Stream the event's playable video; authentication is enforced by the default ``IsAuthenticated`` permission.
+
+        The asset is chosen by ``Event.playable_video``, the same rule the serializers use to advertise the stream.
+        Event slugs are not unique; like ``QuerySet.first()``, the lowest pk wins, which is also why this does not use
+        ``get_object_or_404`` (it would raise ``MultipleObjectsReturned``).
+        """
+        event = Event.objects.filter(slug=event_slug).prefetch_related('videos').first()
+        if event is None:
+            raise Http404
+        video_asset = event.playable_video()
+        if video_asset is None:
+            raise Http404
+        return stream_file_field(request, video_asset.video_file)
 
 
 class VideoAssetIncrementViewCountView(APIView):

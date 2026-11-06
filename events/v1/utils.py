@@ -39,8 +39,9 @@ def get_similar_events(event_slug: str) -> list[Event]:
     if event.tags.exists():
         similarity_query |= Q(tags__in=event.tags.all())
 
-    similar_events = Event.objects.filter(exclude_current & similarity_query & published_filter).distinct()
-    latest_events = Event.objects.filter(exclude_current & published_filter).order_by('-event_time')[:5]
+    cards = Event.objects.with_card_data()
+    similar_events = cards.filter(exclude_current & similarity_query & published_filter).distinct()
+    latest_events = cards.filter(exclude_current & published_filter).order_by('-event_time')[:5]
 
     combined_events = list(similar_events) + list(latest_events)
     unique_events = {event.id: event for event in combined_events}.values()

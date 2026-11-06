@@ -8,6 +8,8 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from events.factories import EventFactory, PlaylistFactory, TagFactory, UserFactory, VideoAssetFactory
@@ -277,6 +279,40 @@ class TestEventCreateAPI:
         assert list(event.tags.all()) == [tag]
         assert list(event.playlists.all()) == [playlist]
         assert list(event.presenters.all()) == [presenter]
+
+    def test_response_queries_independent_of_presenters(self, staff_client, monkeypatch):
+        """ Building the 201 body costs the same queries for 1 presenter as for 3, with the same shape """
+        counts = []
+        real_to_representation = EventCreateSerializer.to_representation
+
+        def counting_to_representation(serializer, instance):
+            with CaptureQueriesContext(connection) as captured:
+                data = real_to_representation(serializer, instance)
+            counts.append(len(captured))
+            return data
+
+        monkeypatch.setattr(EventCreateSerializer, 'to_representation', counting_to_representation)
+        responses = []
+        for presenter_count in (1, 3):
+            presenters = UserFactory.create_batch(presenter_count)
+            response = staff_client.post(
+                reverse('event-create'),
+                self.payload(VideoAssetFactory(event=None).id, presenter_ids=[user.id for user in presenters]),
+                format='json',
+            )
+            assert response.status_code == status.HTTP_201_CREATED
+            responses.append((response, presenters))
+
+        assert len(counts) == 2
+        assert counts[0] == counts[1]
+        for response, presenters in responses:
+            assert response.data['title'] == 'Intro to Django'
+            assert response.data['status'] == Event.EventStatus.PUBLISHED
+            assert set(response.data['publisher']) == {'id', 'first_name', 'last_name'}
+            assert sorted(response.data['presenters'], key=lambda item: item['user_id']) == [
+                {'user_id': user.id, 'first_name': user.first_name, 'last_name': user.last_name, 'email': user.email}
+                for user in sorted(presenters, key=lambda user: user.id)
+            ]
 
     def test_unknown_presenter_is_rejected_without_writes(self, staff_client):
         """ A nonexistent presenter must fail validation before anything is created """
