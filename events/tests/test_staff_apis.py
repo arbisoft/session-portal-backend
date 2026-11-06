@@ -15,6 +15,7 @@ from django.urls import reverse
 
 from events.factories import EventFactory, PlaylistFactory, TagFactory, UserFactory, VideoAssetFactory
 from events.models import Event, EventPresenter, Tag, VideoAsset
+from events.tests.test_apis import make_playable
 from events.v1.serializers import EventCreateSerializer
 
 
@@ -100,6 +101,54 @@ class TestIncrementViewCountAPI:
         response = user_client.post(reverse('video-asset-increment-view', args=['missing']))
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert not VideoAsset.objects.exists()
+
+    def test_anonymous_is_rejected(self):
+        """ Counting a view requires authentication """
+        response = APIClient().post(reverse('video-asset-increment-view', args=['talk']))
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_duplicate_slug_counts_playable_asset(self, user_client):
+        """ Within the first event the playable video with the lowest pk is counted, not the others """
+        event = EventFactory(slug='talk')
+        unplayable = VideoAssetFactory(event=event)
+        first_playable = VideoAssetFactory(event=event)
+        second_playable = VideoAssetFactory(event=event)
+        make_playable(first_playable, second_playable)
+        EventFactory(slug='talk')
+
+        response = user_client.post(reverse('video-asset-increment-view', args=['talk']))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == {'view_count': 1}
+        counts = dict(VideoAsset.objects.values_list('pk', 'view_count'))
+        assert counts == {unplayable.pk: 0, first_playable.pk: 1, second_playable.pk: 0}
+
+    def test_duplicate_slug_prefers_lowest_event(self, user_client):
+        """ The event with the lowest pk is counted when several share the slug """
+        older_asset = VideoAssetFactory(event=EventFactory(slug='talk'))
+        newer_asset = VideoAssetFactory(event=EventFactory(slug='talk'))
+        make_playable(newer_asset)
+
+        response = user_client.post(reverse('video-asset-increment-view', args=['talk']))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == {'view_count': 1}
+        assert VideoAsset.objects.get(pk=older_asset.pk).view_count == 1
+        assert VideoAsset.objects.get(pk=newer_asset.pk).view_count == 0
+
+    def test_increment_runs_two_queries(self, user_client, django_assert_num_queries):
+        """ One update resolves and increments the asset, one read returns the new value """
+        video_asset = VideoAssetFactory(event=EventFactory(slug='talk'))
+        VideoAssetFactory(event=EventFactory(slug='talk'))
+
+        with django_assert_num_queries(2):
+            response = user_client.post(reverse('video-asset-increment-view', args=['talk']))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == {'view_count': 1}
+        assert VideoAsset.objects.get(pk=video_asset.pk).view_count == 1
 
 
 @pytest.mark.django_db
