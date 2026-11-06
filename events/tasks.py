@@ -11,6 +11,7 @@ from django.conf import settings
 from django.core.files import File
 
 from events.models import VideoAsset
+from events.v1.uploads import cleanup_sessions, finalize_session
 
 
 def _get_file_id(url):
@@ -102,3 +103,21 @@ def download_google_drive_video(video_asset_id, drive_link):
     print(f"Failed to process VideoAsset ID: {video_asset_id}")
     VideoAsset.objects.filter(id=video_asset_id).update(status=VideoAsset.VideoStatus.FAILED)
     return False
+
+
+@shared_task(autoretry_for=(OSError,), retry_backoff=True, retry_backoff_max=900, max_retries=5)
+def finalize_upload_session(session_id):
+    """
+    Verify and register a fully uploaded file. Idempotent, so redelivery and the stale-finalization sweep are safe.
+
+    Storage errors are retried with backoff. Anything else leaves the session FINALIZING for the sweep to re-queue
+    until it times out.
+    """
+    session = finalize_session(session_id)
+    return session.status if session else None
+
+
+@shared_task
+def cleanup_upload_sessions():
+    """ Expire abandoned upload sessions and remove what they leave behind. Schedule it, e.g. hourly """
+    return cleanup_sessions()

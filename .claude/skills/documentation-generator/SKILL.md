@@ -22,6 +22,7 @@ This repo has no `docs/` or `plans/` directory and no `CHANGELOG.md` / `CONTRIBU
 | `README.md` | New developer | Setup from scratch (venv and Docker paths), env vars, how to run the server, tests, and lint |
 | `CLAUDE.md` | Claude Code sessions | Commands, architecture, "easy to trip over" traps, conventions. Always loaded, so it is budget-constrained: follow the `claude-md-writing` skill before editing |
 | `DATABASE_DESIGN.md` | Developer, DBA | Mermaid ER diagram of the intended schema (known to predate some fields; see reviewer's Known drift) |
+| `UPLOADS.md` | Developer, operator | Resumable upload protocol, error codes, durability rules, `RESUMABLE_UPLOAD_*` settings, cleanup scheduling, infrastructure limits. Verify against `events/v1/uploads.py`, `events/v1/views.py` and `settings/base.py` |
 | `.claude/rules/*.md` | Contributors and agents | Coding standards: Django, Python/lint, SOLID, security, testing, branching/PR. Indexed by `.claude/rules/README.md` |
 | `.github/PULL_REQUEST_TEMPLATE.md` | PR author | Description, Taiga ticket link, review count, migration compatibility |
 | Generated OpenAPI schema | API consumers | `/api/schema/`, `/api/docs/` (Swagger), `/api/redoc/` via drf-spectacular. There is **no hand-written API reference** |
@@ -47,7 +48,7 @@ Do not use when:
 - Read the source of truth for a claim before writing it (see the table in Step 9)
 - Review existing docs before restructuring; preserve useful content and the file's established structure
 - Document exact commands, not descriptions of commands ("run `tox -e quality`", not "run the linter")
-- Document every external requirement: PostgreSQL (with `pg_trgm`), ffmpeg binary, Redis and a Celery worker for Drive imports, Docker/compose where relevant
+- Document every external requirement: PostgreSQL (with `pg_trgm`), ffmpeg binary, Redis and a Celery worker for Drive imports and resumable-upload finalization, Docker/compose where relevant
 - Mark unknowns explicitly rather than inventing detail
 - Keep README and `CLAUDE.md` consistent where both state the same fact (commands, Python/Postgres versions, env vars)
 - End every run with the Step 10 handoff
@@ -68,7 +69,7 @@ Do not use when:
 | Area | Required content | Lives in |
 | --- | --- | --- |
 | Project overview | Purpose, main features, tech stack | `README.md`, `CLAUDE.md` → Project |
-| Prerequisites | Python 3.12, PostgreSQL 16, ffmpeg, Redis (Drive imports only), Docker (optional) | `README.md` |
+| Prerequisites | Python 3.12, PostgreSQL 16, ffmpeg, Redis (Drive imports and resumable uploads), Docker (optional) | `README.md` |
 | Setup | Clone, venv, `pip install -r requirements/base.txt` (+ `dev.txt` for tests/lint), `.env`, `local.py`, database, `migrate`, `runserver` | `README.md` |
 | Environment variables | `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_PORT` (compose only), with what reads each | `README.md` |
 | Usage | Run server, Celery worker, management commands, Django admin | `README.md`, `CLAUDE.md` → Commands |
@@ -135,7 +136,7 @@ The README is the entry point for a new developer. Keep its existing order (env 
 Check that it covers:
 
 - Project name, one-sentence purpose, tech stack
-- Prerequisites, including **ffmpeg** (required by `VideoAsset.save()`) and **Redis + Celery worker** (Drive imports only)
+- Prerequisites, including **ffmpeg** (required by `VideoAsset.save()`) and **Redis + Celery worker** (Drive imports and resumable-upload finalization)
 - Installing `requirements/base.txt` and, for tests/lint, `requirements/dev.txt` (it does **not** include base)
 - Env vars and where each is read
 - Running the server, a Celery worker, tests (`pytest --cov --cov-report=term`), lint (`tox -e quality`, `tox -e isort`)
