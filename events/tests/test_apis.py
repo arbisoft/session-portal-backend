@@ -1,12 +1,14 @@
 import pytest
 from faker import Faker
 from rest_framework import status
+from rest_framework.test import APIClient
 
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
 from events.factories import EventFactory, PlaylistFactory, TagFactory, UserFactory, VideoAssetFactory
-from events.models import VideoAsset
+from events.models import Event, VideoAsset
+from events.v1.utils import event_videos
 
 fake = Faker()
 User = get_user_model()
@@ -131,3 +133,140 @@ class TestEventsAPI:
         assert event.id not in returned_ids
         # Similar events + 5 latest events
         assert len(results) == 6
+
+
+def make_playable(*assets):
+    """ Give assets a stored file name without running the ffmpeg processing done by VideoAsset.save() """
+    VideoAsset.objects.filter(pk__in=[asset.pk for asset in assets]).update(video_file='talk.mp4')
+
+
+@pytest.mark.django_db
+class TestEventVideosOrdering:
+    """ Test cases for the lookup shared by the detail and view count endpoints """
+
+    def test_lowest_event_pk_comes_first(self):
+        """ With a duplicate slug the older event wins, even when its video has no file """
+        older = EventFactory(slug='talk')
+        newer = EventFactory(slug='talk')
+        newer_asset = VideoAssetFactory(event=newer)
+        older_asset = VideoAssetFactory(event=older)
+        make_playable(newer_asset)
+
+        assert list(event_videos('talk')) == [older_asset, newer_asset]
+
+    def test_playable_before_unplayable_then_pk(self):
+        """ Within an event videos with a file come first, each group by ascending pk """
+        event = EventFactory(slug='talk')
+        unplayable = VideoAssetFactory(event=event)
+        empty_name = VideoAssetFactory(event=event)
+        first_playable = VideoAssetFactory(event=event)
+        second_playable = VideoAssetFactory(event=event)
+        make_playable(second_playable, first_playable)
+        VideoAsset.objects.filter(pk=empty_name.pk).update(video_file='')
+
+        assert list(event_videos('talk')) == [first_playable, second_playable, unplayable, empty_name]
+
+    def test_other_slugs_are_excluded(self):
+        """ Only videos of the requested slug are returned """
+        VideoAssetFactory(event=EventFactory(slug='other'))
+
+        assert not event_videos('talk').exists()
+
+
+@pytest.mark.django_db
+class TestEventFirstVideo:
+    """ Test cases for Event.first_video and Event.playable_video """
+
+    @staticmethod
+    def loaded(event):
+        """ The event as the list and detail endpoints load it, with its videos prefetched """
+        return Event.objects.with_card_data().get(pk=event.pk)
+
+    def test_first_video_is_lowest_pk(self):
+        """ Without the playable filter the lowest pk wins, with or without a file """
+        event = EventFactory(slug='talk')
+        unplayable = VideoAssetFactory(event=event)
+        playable = VideoAssetFactory(event=event)
+        make_playable(playable)
+
+        assert self.loaded(event).first_video() == unplayable
+
+    def test_only_playable_skips_files_less_video(self):
+        """ With only_playable the lowest pk among videos that have a file wins """
+        event = EventFactory(slug='talk')
+        VideoAssetFactory(event=event)
+        playable = VideoAssetFactory(event=event)
+        make_playable(playable)
+
+        assert self.loaded(event).first_video(only_playable=True) == playable
+
+    def test_playable_video_matches_only_playable(self):
+        """ playable_video is first_video(only_playable=True) """
+        event = EventFactory(slug='talk')
+        VideoAssetFactory(event=event)
+        make_playable(VideoAssetFactory(event=event), VideoAssetFactory(event=event))
+        loaded = self.loaded(event)
+
+        assert loaded.playable_video() == loaded.first_video(only_playable=True)
+        assert loaded.playable_video() is not None
+
+    def test_no_videos_returns_none(self):
+        """ An event without a (playable) video has nothing to return """
+        event = EventFactory(slug='talk')
+        VideoAssetFactory(event=event)
+        loaded = self.loaded(event)
+
+        assert loaded.first_video() is not None
+        assert loaded.first_video(only_playable=True) is None
+        assert loaded.playable_video() is None
+        assert self.loaded(EventFactory(slug='empty')).first_video() is None
+
+    def test_python_and_sql_rules_agree(self):
+        """ event_videos (SQL) and playable_video (Python) pick the same asset """
+        event = EventFactory(slug='talk')
+        VideoAssetFactory(event=event)
+        make_playable(VideoAssetFactory(event=event), VideoAssetFactory(event=event))
+
+        assert event_videos('talk').first() == self.loaded(event).playable_video()
+
+
+@pytest.mark.django_db
+class TestVideoAssetDetailDuplicateSlugs:
+    """ Test cases for the video asset detail endpoint when slugs are not unique """
+
+    def test_duplicate_slug_returns_chosen_asset(self, user_client):
+        """ Two events with the same slug answer 200 with the asset the stream endpoint serves """
+        older = EventFactory(slug='talk')
+        newer = EventFactory(slug='talk')
+        VideoAssetFactory(event=older, title='No file')
+        newer_playable = VideoAssetFactory(event=newer, title='Newer playable')
+        make_playable(newer_playable)
+
+        response = user_client.get(reverse("video-asset-detail", args=['talk']))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["title"] == "No file"
+        assert response.data["event"]["id"] == older.id
+
+    def test_playable_asset_preferred_in_event(self, user_client):
+        """ Within one event the video with a file is described """
+        event = EventFactory(slug='talk')
+        VideoAssetFactory(event=event, title='No file')
+        make_playable(VideoAssetFactory(event=event, title='Playable'))
+
+        response = user_client.get(reverse("video-asset-detail", args=['talk']))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["title"] == "Playable"
+
+    def test_unknown_slug_returns_404(self, user_client):
+        """ A slug without videos is not found """
+        response = user_client.get(reverse("video-asset-detail", args=['missing']))
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_anonymous_is_rejected(self):
+        """ The detail endpoint requires authentication """
+        response = APIClient().get(reverse("video-asset-detail", args=['talk']))
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
