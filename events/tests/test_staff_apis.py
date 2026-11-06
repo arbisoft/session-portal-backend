@@ -7,6 +7,7 @@ from PIL import Image
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from django.core.files.storage import FileSystemStorage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
@@ -405,6 +406,7 @@ class TestEventCreateAPI:
         assert video_asset.duration == 90
         assert video_asset.thumbnail.name == generated_thumbnail
 
+    @pytest.mark.django_db(transaction=True)
     @pytest.mark.usefixtures('media_storage')
     def test_uploaded_thumbnail_replaces_generated(self, staff_client):
         """ A thumbnail sent with the event is stored without reprocessing the video """
@@ -424,6 +426,49 @@ class TestEventCreateAPI:
         assert video_asset.duration == 90
         assert video_asset.thumbnail.name.startswith('cover')
         assert video_asset.thumbnail.storage.exists(video_asset.thumbnail.name)
+
+    def test_uploaded_thumbnail_waits_for_commit(
+        self, staff_client, media_storage, django_capture_on_commit_callbacks
+    ):
+        """ The cover is only queued as an on_commit callback, so nothing is stored while the transaction is open """
+        video_asset = self.processed_video_asset()
+        generated_thumbnail = video_asset.thumbnail.name
+
+        with django_capture_on_commit_callbacks() as callbacks:
+            response = staff_client.post(
+                reverse('event-create'),
+                self.payload(video_asset.id, thumbnail=self.thumbnail_image()),
+                format='multipart',
+            )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        video_asset.refresh_from_db()
+        assert video_asset.event_id == response.data['id']
+        assert video_asset.thumbnail.name == generated_thumbnail
+        assert len(callbacks) == 1
+        assert not list((media_storage / 'thumbnail').glob('cover*'))
+
+    @pytest.mark.django_db(transaction=True)
+    @pytest.mark.usefixtures('media_storage')
+    def test_thumbnail_write_failure_keeps_event(self, staff_client, caplog):
+        """ A storage error while writing the cover is logged and the event keeps the generated thumbnail """
+        video_asset = self.processed_video_asset()
+        generated_thumbnail = video_asset.thumbnail.name
+
+        with patch.object(FileSystemStorage, '_save', side_effect=OSError('disk full')):
+            with caplog.at_level('ERROR', logger='asp_api'):
+                response = staff_client.post(
+                    reverse('event-create'),
+                    self.payload(video_asset.id, thumbnail=self.thumbnail_image()),
+                    format='multipart',
+                )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Event.objects.filter(pk=response.data['id']).exists()
+        video_asset.refresh_from_db()
+        assert video_asset.event_id == response.data['id']
+        assert video_asset.thumbnail.name == generated_thumbnail
+        assert f'event_thumbnail_store_failed asset={video_asset.pk}' in caplog.text
 
     def test_failure_after_event_creation_rolls_back(self, staff_client):
         """ A failure part way through must not leave a half-created event behind """

@@ -1,6 +1,8 @@
 import base64
 import binascii
+import logging
 import os
+from functools import partial
 
 from rest_framework import serializers
 
@@ -21,6 +23,7 @@ from events.models import (
 )
 from events.v1.uploads import clean_display_filename, confirmed_offset
 
+logger = logging.getLogger("asp_api")
 user_model = get_user_model()
 
 VIDEO_ASSET_ASSIGNED_ERROR = 'This video asset is already assigned to an event.'
@@ -233,13 +236,26 @@ class EventCreateSerializer(serializers.ModelSerializer):
             [EventPresenter(event=event, user=user) for user in dict.fromkeys(presenters)]
         )
 
-        asset_changes = {'event': event}
+        VideoAsset.objects.filter(pk=video_asset.pk).update(event=event)
         if thumbnail:
-            video_asset.thumbnail.save(thumbnail.name, thumbnail, save=False)
-            asset_changes['thumbnail'] = video_asset.thumbnail.name
-        VideoAsset.objects.filter(pk=video_asset.pk).update(**asset_changes)
+            transaction.on_commit(partial(self.store_thumbnail, video_asset, thumbnail))
 
         return event
+
+    @staticmethod
+    def store_thumbnail(video_asset, thumbnail):
+        """
+        Write the uploaded cover and point the asset at it.
+
+        Runs after the event transaction commits, so a rollback never leaves an orphan file behind. A storage failure
+        is logged and the event keeps the thumbnail generated from the video.
+        """
+        try:
+            video_asset.thumbnail.save(thumbnail.name, thumbnail, save=False)
+        except OSError:
+            logger.exception("event_thumbnail_store_failed asset=%s", video_asset.pk)
+            return
+        VideoAsset.objects.filter(pk=video_asset.pk).update(thumbnail=video_asset.thumbnail.name)
 
     def to_representation(self, instance):
         """ Serialize a freshly loaded event so presenters, tags and videos cost no per-row queries """
@@ -307,8 +323,8 @@ class UploadSessionSerializer(serializers.ModelSerializer):
     offset = serializers.SerializerMethodField()
     video_asset_id = serializers.IntegerField(read_only=True)
     upload_status = serializers.CharField(source='status', read_only=True)
-    chunk_size = serializers.IntegerField(read_only=True, help_text='Chunk size the client should use')
-    max_chunk_size = serializers.IntegerField(read_only=True, help_text='Largest chunk the server accepts')
+    chunk_size = serializers.SerializerMethodField(help_text='Chunk size the client should use')
+    max_chunk_size = serializers.SerializerMethodField(help_text='Largest chunk the server accepts')
 
     class Meta:
         model = UploadSession
@@ -323,9 +339,12 @@ class UploadSessionSerializer(serializers.ModelSerializer):
         """ Committed bytes the client does not need to send again """
         return confirmed_offset(session)
 
-    def to_representation(self, instance):
-        """ Add the chunk limits, which come from settings rather than from the session """
-        data = super().to_representation(instance)
-        data['chunk_size'] = settings.RESUMABLE_UPLOAD_CHUNK_BYTES
-        data['max_chunk_size'] = settings.RESUMABLE_UPLOAD_MAX_CHUNK_BYTES
-        return data
+    @staticmethod
+    def get_chunk_size(_session) -> int:
+        """ Chunk size the client should use, from settings rather than from the session """
+        return settings.RESUMABLE_UPLOAD_CHUNK_BYTES
+
+    @staticmethod
+    def get_max_chunk_size(_session) -> int:
+        """ Largest chunk the server accepts, from settings rather than from the session """
+        return settings.RESUMABLE_UPLOAD_MAX_CHUNK_BYTES
