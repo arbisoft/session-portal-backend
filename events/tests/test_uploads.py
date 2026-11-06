@@ -125,6 +125,16 @@ class TestUploadSessionCreation:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert 'filename' in response.data
 
+    def test_exe_rejected_with_allowed_formats(self, staff_client):
+        """ The filename error names the extension and lists the allowed formats """
+        response = start_upload(staff_client, b'x' * 10, filename='malware.exe')
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert [str(error) for error in response.data['filename']] == [
+            "Unsupported file type '.exe'. Allowed formats: avi, mov, mp4, webm."
+        ]
+        assert not UploadSession.objects.exists()
+
     def test_oversized_file_is_rejected(self, staff_client, settings):
         """ The declared size is checked against the configured limit up front """
         settings.RESUMABLE_UPLOAD_MAX_FILE_BYTES = 50

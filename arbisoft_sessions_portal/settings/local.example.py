@@ -29,6 +29,9 @@ DATABASES = {
 # RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS = 6
 # RESUMABLE_UPLOAD_RETENTION_DAYS = 7
 
+# Largest caption file (.vtt or .srt) accepted through the admin.
+# CAPTIONS_MAX_FILE_BYTES = 2 * 1024 ** 2
+
 # Sentry error reporting is off while SENTRY_DSN is unset.
 # SENTRY_DSN = "https://<key>@<org>.ingest.sentry.io/<project>"
 # SENTRY_ENVIRONMENT = "local"

@@ -24,7 +24,7 @@ from uuid import UUID
 from celery import current_app
 from kombu.exceptions import OperationalError as BrokerError
 from rest_framework import status
-from rest_framework.exceptions import APIException, ValidationError
+from rest_framework.exceptions import APIException
 
 from django.conf import settings
 from django.db import IntegrityError, OperationalError, transaction
@@ -32,7 +32,7 @@ from django.db.models import F, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
-from events.models import ALLOWED_VIDEO_EXTENSIONS, UploadSession, VideoAsset
+from events.models import UploadSession, VideoAsset
 
 logger = logging.getLogger("asp_api")
 
@@ -92,16 +92,6 @@ def clean_display_filename(raw_name: str) -> str:
 def file_extension(filename: str) -> str:
     """ Lower-case extension without the dot """
     return os.path.splitext(filename)[1].lower().lstrip(".")
-
-
-def validate_video_extension(filename: str) -> str:
-    """ Return ``filename`` unchanged if it has a supported video extension, otherwise raise a validation error """
-    extension = file_extension(filename)
-    if extension not in ALLOWED_VIDEO_EXTENSIONS:
-        raise ValidationError(
-            f"Unsupported file type '.{extension}'. Allowed formats: {', '.join(sorted(ALLOWED_VIDEO_EXTENSIONS))}."
-        )
-    return filename
 
 
 def final_storage_name(session: UploadSession) -> str:

@@ -17,6 +17,17 @@ from django.utils.translation import gettext_lazy as _
 logger = logging.getLogger("asp_api")
 
 ALLOWED_VIDEO_EXTENSIONS = ("mp4", "mov", "avi", "webm")
+ALLOWED_CAPTION_EXTENSIONS = ("vtt", "srt")
+validate_video_extension = FileExtensionValidator(
+    sorted(ALLOWED_VIDEO_EXTENSIONS),
+    message="Unsupported file type '.%(extension)s'. Allowed formats: %(allowed_extensions)s.",
+)
+
+
+def validate_video_filename(name: str) -> None:
+    """ Apply ``validate_video_extension`` to a bare filename instead of an uploaded file """
+    validate_video_extension(File(None, name=name))
+
 
 User = get_user_model()
 
@@ -128,12 +139,17 @@ class VideoAsset(models.Model):
         storage=video_storage,
         null=True,
         blank=True,
-        validators=[FileExtensionValidator(list(ALLOWED_VIDEO_EXTENSIONS))],
+        validators=[validate_video_extension],
     )
     duration = models.IntegerField(default=0)  # in seconds
     thumbnail = models.ImageField(storage=thumbnail_storage, null=True, blank=True)
     status = models.CharField(max_length=20, choices=VideoStatus.choices)
-    captions_file = models.FileField(storage=captions_storage, null=True, blank=True)
+    captions_file = models.FileField(
+        storage=captions_storage,
+        null=True,
+        blank=True,
+        validators=[FileExtensionValidator(list(ALLOWED_CAPTION_EXTENSIONS))],
+    )
     file_size = models.BigIntegerField(default=0)  # in bytes
     view_count = models.PositiveIntegerField(default=0)
     created = models.DateTimeField(auto_now_add=True)
