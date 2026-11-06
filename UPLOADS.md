@@ -6,9 +6,9 @@ The older single-request upload is the same `POST /api/v1/events/videoassets/` w
 
 ## Protocol
 
-An application-managed offset protocol modelled on [tus](https://tus.io/protocols/resumable-upload) (`Upload-Offset`, `application/offset+octet-stream`, `Upload-Checksum`). It is **not** a conforming tus server: it has no `HEAD`/`OPTIONS` discovery and uses JSON responses. The stack has no object storage (files live on a shared media volume) and requests pass through the Next.js BFF, so a small, explicit protocol was chosen over adding a tus dependency.
+An application-managed offset protocol modelled on [tus](https://tus.io/protocols/resumable-upload) (`Upload-Offset`, `application/offset+octet-stream`, `Upload-Checksum`). It is **not** a conforming tus server: it has no `HEAD`/`OPTIONS` discovery and uses JSON responses. The stack has no object storage (files live on a shared media volume) and requests pass through the Next.js backend-for-frontend (BFF) proxy, so a small, explicit protocol was chosen over adding a tus dependency.
 
-All endpoints are under `/api/v1/events/videoassets/`, the same path as the single-request upload, require a JWT, and are staff-only (`IsStaffPermission`). A session belongs to the user who created it; anyone else gets `404`.
+All endpoints are under `/api/v1/events/videoassets/`, the same path as the single-request upload, require a JSON Web Token (JWT), and are staff-only (`IsStaffPermission`). A session belongs to the user who created it; anyone else gets `404`.
 
 | Method and path | Purpose |
 | --- | --- |
@@ -55,7 +55,7 @@ Errors are `{"code": ..., "detail": ...}` plus context. Codes the client acts on
 - Session ids are random UUIDs; access is limited to the owner, other users see `404`.
 - The client filename is display-only (directories and control characters stripped). Storage paths are built from the session UUID, never from user input.
 - Extension allow-list (`mp4`, `mov`, `avi`, `webm`), magic-byte check on the first chunk and again at finalization, size cap, per-user active-session cap, free-space check that also accounts for space promised to other sessions.
-- Throttle scopes `upload_create` (30/hour), `upload_chunk` (2000/min), `upload_status` (600/min) in `REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']`. The counters use Django's cache; with several instances configure a shared cache or the limits apply per process.
+- Throttle scopes `upload_create` (30/hour), `upload_chunk` (2000/min), `upload_status` (600/min) in `REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']`. The counters live in Django's default cache, which `settings/base.py` points at Redis db 1 (`REDIS_CACHE_URL`, default `redis://redis:6379/1`), so every web worker shares them and Redis must be reachable. `settings/test.py` uses an in-process cache instead.
 - Nothing logs file contents, tokens or filenames. Log lines carry the session id (`upload_session_created`, `upload_session_finalized`, `upload_session_failed`, `upload_data_loss`, `upload_cleanup`, ...).
 - Not implemented: virus scanning or quarantine (none exists in the product today).
 
@@ -65,7 +65,7 @@ All read from the environment (see `settings/base.py`).
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `RESUMABLE_UPLOAD_ROOT` | `MEDIA_ROOT/uploads` | Partial files. Must be shared by every web and Celery worker, and should be on the same filesystem as `MEDIA_ROOT/videos` so promotion is a rename. Do not serve it publicly. |
+| `RESUMABLE_UPLOAD_ROOT` | `arbisoft_sessions_portal/uploads_tmp` (outside `MEDIA_ROOT`, which is `arbisoft_sessions_portal/media`) | Partial files. Must be shared by every web and Celery worker, and must stay outside `MEDIA_ROOT`, which `DEBUG` serves at `/media/`. Prefer the same filesystem as `MEDIA_ROOT/videos` so promotion is a rename; across filesystems it becomes a copy. |
 | `RESUMABLE_UPLOAD_MAX_FILE_BYTES` | 20 GiB | Keep the frontend `MAX_VIDEO_FILE_SIZE_BYTES` equal. |
 | `RESUMABLE_UPLOAD_CHUNK_BYTES` | 8 MiB | Recommended chunk size, returned to the client. |
 | `RESUMABLE_UPLOAD_MAX_CHUNK_BYTES` | 16 MiB | Hard per-request cap. |
@@ -84,10 +84,11 @@ All read from the environment (see `settings/base.py`).
 
 The repository contains no reverse-proxy or production server configuration, so these could not be verified here:
 
-- Reverse proxy / ingress: request body limit of at least `RESUMABLE_UPLOAD_MAX_CHUNK_BYTES` (nginx `client_max_body_size 16m;` or more). nginx's default of 1 MB rejects every chunk. A 20 GiB limit is no longer needed.
+- Reverse proxy / ingress: request body limit of at least `RESUMABLE_UPLOAD_MAX_CHUNK_BYTES` (nginx `client_max_body_size 16m;` or more). nginx's default of 1 MB rejects every chunk. The proxy does not need a 20 GiB body limit, because no single request carries the whole file.
 - Application server: a request timeout long enough for one chunk at the slowest expected uplink (an 8 MiB chunk at 1 Mbit/s takes about 70 s). Django reads the body in 1 MiB blocks and never buffers a chunk in memory.
-- Disk: free space of at least the largest expected upload plus `RESUMABLE_UPLOAD_MIN_FREE_BYTES`, on the volume holding `RESUMABLE_UPLOAD_ROOT` and `MEDIA_ROOT`.
-- Celery: a worker must run (it was previously only needed for Drive imports) and must mount the same volume as the web containers. In `docker-compose.yml` both already mount `./media`.
+- Disk: free space of at least the largest expected upload plus `RESUMABLE_UPLOAD_MIN_FREE_BYTES`, on the volumes holding `RESUMABLE_UPLOAD_ROOT` and `MEDIA_ROOT`.
+  When the upload root and the video storage are on different volumes (the default in `docker-compose.yml`), finalization moves the file with a full copy, so the video storage volume also needs free space for the whole file (up to 20 GiB) plus `RESUMABLE_UPLOAD_MIN_FREE_BYTES` headroom at finalize time. This is not checked up front; the free-space guard only looks at `RESUMABLE_UPLOAD_ROOT`.
+- Celery: a worker must run (it also runs the Google Drive imports) and must mount the same volumes as the web containers. In `docker-compose.yml` both mount `./media` and the `asp-uploads` volume (`/app/arbisoft_sessions_portal/uploads_tmp`).
 
 ## Known limitations
 

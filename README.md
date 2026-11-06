@@ -75,6 +75,7 @@ DJANGO_DEBUG=<django debug flag>
 | `DJANGO_DEBUG`                                            | `settings/base.py`                                                                                 | Any non-empty value, including `False`, turns debug on. Leave it unset to turn it off. `ALLOWED_HOSTS` is empty, so `runserver` refuses to start with debug off: set it for local development. Debug also serves `/media/` files                                                                                                                                   |
 | `DJANGO_PORT`                                             | `docker-compose.yml` only                                                                          | Port that `runserver` binds and that the `django` container publishes. With Option 1, `runserver` uses its own default (8000)                                                                                                                                                                                                                                      |
 | `RESUMABLE_UPLOAD_*` | `settings/base.py` | Optional limits and locations for resumable uploads (file size, chunk size, session TTL, partial-file directory). Defaults and meaning are in the Settings table of [UPLOADS.md](UPLOADS.md) |
+| `REDIS_CACHE_URL` | `settings/base.py` | Redis URL of the Django cache that holds the upload throttle counters. Defaults to `redis://redis:6379/1`. See [Redis and Celery](#redis-and-celery) |
 | `SENTRY_DSN` | `settings/base.py` | Sentry error reporting is off when this is unset. Initialised by `arbisoft_sessions_portal/sentry.py` when the project package is imported (web, Celery worker and beat, `manage.py`), from the final `settings.SENTRY_DSN`, so `settings/local.py` can override it and `settings/test.py` sets it to `None` (tests never create a client) |
 | `SENTRY_ENVIRONMENT` | `settings/base.py` | Optional environment name shown in Sentry (for example `production`) |
 | `SENTRY_TRACES_SAMPLE_RATE` | `settings/base.py` | Fraction of requests and tasks traced, from `0.0` to `1.0`. Defaults to `0.0` |
@@ -286,6 +287,8 @@ docker-compose up --build
 ```
 
 In bash `UID` is read-only, so `export UID=...` fails. Use `export GID=$(id -g)` followed by `export UID` instead.
+
+Partial resumable uploads are kept in the named volume `asp-uploads`, mounted at `/app/arbisoft_sessions_portal/uploads_tmp` in the `django` and `celery` containers (outside `./media`, which `DEBUG` serves at `/media/`). `docker-compose down -v` deletes that volume and any in-progress uploads with it. The services built from the `Dockerfile` all get the same `UID` and `GID` build args, which keeps the volume writable by both containers.
 
 Once the containers are up, check the API connection by visiting http://localhost:${DJANGO_PORT} to ensure the Django app is running properly.
 
