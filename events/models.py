@@ -1,6 +1,7 @@
 import logging
 import os
 import uuid
+from operator import attrgetter
 
 import ffmpeg
 
@@ -10,6 +11,7 @@ from django.core.files.base import File
 from django.core.files.storage import FileSystemStorage
 from django.core.validators import FileExtensionValidator
 from django.db import models
+from django.db.models import Prefetch
 from django.utils.translation import gettext_lazy as _
 
 logger = logging.getLogger("asp_api")
@@ -17,17 +19,22 @@ logger = logging.getLogger("asp_api")
 ALLOWED_VIDEO_EXTENSIONS = ("mp4", "mov", "avi", "webm")
 
 User = get_user_model()
+
+VIDEOS_DIR = 'videos'
+THUMBNAILS_DIR = 'thumbnails'
+CAPTIONS_DIR = 'captions'
+PUBLIC_MEDIA_DIRS = (THUMBNAILS_DIR, CAPTIONS_DIR)
 video_storage = FileSystemStorage(
-    location=settings.MEDIA_ROOT / 'videos',
-    base_url=settings.MEDIA_URL + 'videos/'
+    location=settings.MEDIA_ROOT / VIDEOS_DIR,
+    base_url=f'{settings.MEDIA_URL}{VIDEOS_DIR}/'
 )
 thumbnail_storage = FileSystemStorage(
-    location=settings.MEDIA_ROOT / 'thumbnails',
-    base_url=settings.MEDIA_URL + 'thumbnails/'
+    location=settings.MEDIA_ROOT / THUMBNAILS_DIR,
+    base_url=f'{settings.MEDIA_URL}{THUMBNAILS_DIR}/'
 )
 captions_storage = FileSystemStorage(
-    location=settings.MEDIA_ROOT / 'captions',
-    base_url=settings.MEDIA_URL + 'captions/'
+    location=settings.MEDIA_ROOT / CAPTIONS_DIR,
+    base_url=f'{settings.MEDIA_URL}{CAPTIONS_DIR}/'
 )
 
 
@@ -51,6 +58,19 @@ class Playlist(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class EventQuerySet(models.QuerySet):
+    """ Queryset helpers for events """
+
+    def with_card_data(self):
+        """ Load everything ``EventSerializer`` reads so serializing a row costs no extra queries """
+        return self.select_related('creator').prefetch_related(
+            'videos',
+            'tags',
+            'playlists',
+            Prefetch('eventpresenter_set', queryset=EventPresenter.objects.select_related('user')),
+        )
 
 
 class Event(models.Model):
@@ -80,8 +100,18 @@ class Event(models.Model):
     created = models.DateTimeField(auto_now_add=True)
     modified = models.DateTimeField(auto_now=True)
 
+    objects = EventQuerySet.as_manager()
+
     def __str__(self):
         return self.title
+
+    def first_video(self) -> 'VideoAsset | None':
+        """ Earliest video of the event, read from prefetched ``videos`` when available """
+        return min(self.videos.all(), key=attrgetter('pk'), default=None)
+
+    def playable_video(self) -> 'VideoAsset | None':
+        """ Earliest video of the event that has a file: the asset the stream endpoint serves """
+        return min((video for video in self.videos.all() if video.video_file), key=attrgetter('pk'), default=None)
 
 
 class VideoAsset(models.Model):

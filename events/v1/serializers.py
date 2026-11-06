@@ -7,6 +7,7 @@ from rest_framework import serializers
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.urls import reverse
 
 from events.models import Event, EventPresenter, Playlist, Tag, UploadSession, VideoAsset
 from events.v1.uploads import clean_display_filename, confirmed_offset, validate_video_extension
@@ -14,6 +15,17 @@ from events.v1.uploads import clean_display_filename, confirmed_offset, validate
 user_model = get_user_model()
 
 VIDEO_ASSET_ASSIGNED_ERROR = 'This video asset is already assigned to an event.'
+
+
+def video_stream_path(event_slug: str | None) -> str:
+    """
+    Path of the authenticated endpoint that streams an event's video; raw ``/media/`` URLs are never exposed.
+
+    Returns ``''`` for an event without a slug, which the ``<slug:event_slug>`` route cannot address.
+    """
+    if not event_slug:
+        return ''
+    return reverse('video-asset-stream', args=[event_slug])
 
 
 class PublisherSerializer(serializers.ModelSerializer):
@@ -59,42 +71,41 @@ class EventSerializer(serializers.ModelSerializer):
     @staticmethod
     def get_tags(event):
         """ Get the tags of an event """
-        return event.tags.all().values_list('name', flat=True)
+        return [tag.name for tag in event.tags.all()]
 
     @staticmethod
     def get_thumbnail(event):
         """ Get thumbnail of an event if available """
-        video = event.videos.first()
+        video = event.first_video()
         return video.thumbnail.url if video and video.thumbnail else ''
 
     @staticmethod
     def get_video_file(event):
-        """ Get video file of an event if available """
-        video = event.videos.first()
-        return video.video_file.url if video and video.video_file else ''
+        """ Authenticated stream endpoint of the event's video if available (never the raw media URL) """
+        return video_stream_path(event.slug) if event.playable_video() else ''
 
     @staticmethod
     def get_video_duration(event):
         """ Get duration of video if available """
-        video = event.videos.first()
+        video = event.first_video()
         return video.duration if video and video.duration else None
 
     @staticmethod
     def get_presenters(event):
         """ Get presenters of an event """
-        event_presenters = EventPresenter.objects.filter(event=event).select_related('user')
-        return EventPresenterSerializer(event_presenters, many=True).data
+        return EventPresenterSerializer(event.eventpresenter_set.all(), many=True).data
 
     @staticmethod
     def get_playlists(event):
         """ Get the playlists of an event """
-        return event.playlists.all().values_list('name', flat=True)
+        return [playlist.name for playlist in event.playlists.all()]
 
 
 class VideoAssetSerializer(serializers.ModelSerializer):
     """ Serializer for the VideoAsset model """
 
     event = EventSerializer()
+    video_file = serializers.SerializerMethodField()
 
     class Meta:
         model = VideoAsset
@@ -102,6 +113,16 @@ class VideoAssetSerializer(serializers.ModelSerializer):
             'title', 'video_file', 'duration', 'thumbnail', 'status', 'file_size', 'view_count', 'event',
             'captions_file',
         )
+
+    @staticmethod
+    def get_video_file(video_asset):
+        """
+        Stream endpoint of the event's playable video, same as ``EventSerializer``; ``''`` without an event.
+
+        Callers must load the event through ``Event.objects.with_card_data()`` so ``videos`` is prefetched.
+        """
+        event = video_asset.event
+        return EventSerializer.get_video_file(event) if event else ''
 
 
 class TagListSerializer(serializers.ModelSerializer):
@@ -217,7 +238,9 @@ class EventCreateSerializer(serializers.ModelSerializer):
         return event
 
     def to_representation(self, instance):
-        return EventSerializer(instance, context=self.context).data
+        """ Serialize a freshly loaded event so presenters, tags and videos cost no per-row queries """
+        event = Event.objects.with_card_data().get(pk=instance.pk)
+        return EventSerializer(event, context=self.context).data
 
 
 class UploadSessionCreateSerializer(serializers.Serializer):
