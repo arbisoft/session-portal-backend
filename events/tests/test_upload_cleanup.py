@@ -1,4 +1,5 @@
 import errno
+import hashlib
 import os
 import time
 from datetime import timedelta
@@ -8,11 +9,13 @@ from unittest.mock import patch
 import pytest
 
 from django.core.management import call_command
+from django.db import transaction
 from django.utils import timezone
 
-from events.models import UploadSession
-from events.tests.test_uploads import UPLOADING, make_video, send_chunk
-from events.v1.uploads import cleanup_sessions, part_path
+from events.models import UploadSession, VideoAsset
+from events.tests.test_staff_apis import fake_ffmpeg
+from events.tests.test_uploads import UPLOADING, make_video, send_chunk, upload_in_chunks
+from events.v1.uploads import cleanup_sessions, finalize_session, part_path
 
 
 @pytest.mark.django_db
@@ -113,6 +116,30 @@ class TestUploadCleanup:
         assert summary['orphan_files_removed'] == 1
         assert not stale.exists()
 
+    def test_unremovable_orphan_does_not_abort_sweep(self, upload_root, caplog):
+        """ An OSError on one partial file is logged and the other orphans are still removed """
+        stuck = upload_root / '3f2b8c9e-1b0a-4c75-9d56-0d4c4f2d1e11.part'
+        stale = upload_root / '4f2b8c9e-1b0a-4c75-9d56-0d4c4f2d1e11.part'
+        upload_root.mkdir(parents=True, exist_ok=True)
+        ancient = time.time() - 7200
+        for path in (stuck, stale):
+            path.write_bytes(b'x')
+            os.utime(path, (ancient, ancient))
+        real_unlink = Path.unlink
+
+        def unlink_denied(path, *args, **kwargs):
+            if path.name == stuck.name:
+                raise PermissionError(errno.EACCES, 'denied', str(path))
+            return real_unlink(path, *args, **kwargs)
+
+        with patch.object(Path, 'unlink', unlink_denied), caplog.at_level('ERROR', logger='asp_api'):
+            summary = cleanup_sessions()
+
+        assert summary['orphan_files_removed'] == 1
+        assert stuck.exists()
+        assert not stale.exists()
+        assert f'upload_orphan_remove_failed file={stuck.name}' in caplog.text
+
     def test_stalled_finalization_is_requeued(self, staff_client, session_for, settings):
         """ A FINALIZING session whose task vanished is queued again """
         data = make_video(100)
@@ -204,3 +231,93 @@ class TestUploadCleanup:
         call_command('cleanup_upload_sessions')
 
         assert 'expired: 0' in capsys.readouterr().out
+
+
+@pytest.mark.django_db
+class TestFinalizationFileCleanup:
+    """ Files left by a failed finalization are removed only once the transaction has committed """
+
+    @pytest.fixture(autouse=True)
+    def storage(self, media_storage, upload_root):  # pylint: disable=unused-argument
+        """ Keep promoted videos and partial files in temporary directories """
+
+    @staticmethod
+    def finished_session(staff_client, session_for, data, **overrides):
+        """ A session whose bytes have all been uploaded """
+        session = session_for(data, **overrides)
+        upload_in_chunks(staff_client, session.id, data, 128)
+        session.refresh_from_db()
+        return session
+
+    def test_discarded_files_are_removed_after_commit(
+        self, staff_client, session_for, media_storage, django_capture_on_commit_callbacks
+    ):
+        """ The asset row goes at once, its video and thumbnail only once the transaction has committed """
+        session = self.finished_session(staff_client, session_for, make_video(500))
+        video = media_storage / 'video_file' / f'{session.id}.mp4'
+
+        with patch('events.models.ffmpeg', fake_ffmpeg(0)), django_capture_on_commit_callbacks() as callbacks:
+            result = finalize_session(session.id)
+
+        thumbnails = list((media_storage / 'thumbnail').glob('*'))
+        assert result.video_asset_id is None
+        assert not VideoAsset.objects.exists()
+        assert video.exists()
+        assert len(thumbnails) == 1
+        for callback in callbacks:
+            callback()
+        assert not video.exists()
+        assert not thumbnails[0].exists()
+        assert not part_path(session.id).exists()
+
+    def test_discard_is_undone_when_transaction_rolls_back(
+        self, staff_client, session_for, media_storage, django_capture_on_commit_callbacks
+    ):
+        """ A rollback registers no file removal, so the retry finds the promoted file under its fixed name """
+        session = self.finished_session(staff_client, session_for, make_video(500))
+
+        with django_capture_on_commit_callbacks(execute=True) as callbacks:
+            with patch('events.models.ffmpeg', fake_ffmpeg(0)), pytest.raises(RuntimeError):
+                with transaction.atomic():
+                    finalize_session(session.id)
+                    raise RuntimeError('rollback')
+
+        assert not callbacks
+        assert (media_storage / 'video_file' / f'{session.id}.mp4').exists()
+        assert not VideoAsset.objects.exists()
+        session.refresh_from_db()
+        assert session.status == UploadSession.UploadStatus.FINALIZING
+
+    def test_failed_session_keeps_part_until_commit(
+        self, staff_client, session_for, django_capture_on_commit_callbacks
+    ):
+        """ The partial file of a failed session is removed by an on_commit callback, not inline """
+        session = self.finished_session(
+            staff_client, session_for, make_video(500), checksum_sha256=hashlib.sha256(b'other').hexdigest()
+        )
+
+        with django_capture_on_commit_callbacks() as callbacks:
+            result = finalize_session(session.id)
+
+        assert result.error_code == 'checksum_mismatch'
+        assert part_path(session.id).exists()
+        for callback in callbacks:
+            callback()
+        assert not part_path(session.id).exists()
+
+    def test_failure_rolled_back_keeps_part(self, staff_client, session_for, django_capture_on_commit_callbacks):
+        """ If the transaction that failed the session rolls back, the partial file is not removed """
+        session = self.finished_session(
+            staff_client, session_for, make_video(500), checksum_sha256=hashlib.sha256(b'other').hexdigest()
+        )
+
+        with django_capture_on_commit_callbacks(execute=True) as callbacks:
+            with pytest.raises(RuntimeError):
+                with transaction.atomic():
+                    finalize_session(session.id)
+                    raise RuntimeError('rollback')
+
+        assert not callbacks
+        assert part_path(session.id).exists()
+        session.refresh_from_db()
+        assert session.status == UploadSession.UploadStatus.FINALIZING

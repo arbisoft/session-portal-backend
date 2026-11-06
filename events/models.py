@@ -274,6 +274,7 @@ class UploadSession(models.Model):
     checksum_sha256 = models.CharField(max_length=64, blank=True, default='')
     status = models.CharField(max_length=20, choices=UploadStatus.choices, default=UploadStatus.UPLOADING)
     error_code = models.CharField(max_length=50, blank=True, default='')
+    # SET_NULL, not DO_NOTHING: VideoAsset is deletable in the admin and a DO_NOTHING FK would fail on the DB constraint
     video_asset = models.ForeignKey(
         VideoAsset, on_delete=models.SET_NULL, related_name='upload_sessions', null=True, blank=True
     )
