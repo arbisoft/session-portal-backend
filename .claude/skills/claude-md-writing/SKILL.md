@@ -52,7 +52,7 @@ A good `CLAUDE.md` answers three questions and stops:
 
 | Element | Content | Example |
 |---------|---------|---------|
-| **WHAT** | Tech stack, project structure, codebase map (critical for monorepos) | "Django 4.2 + DRF backend, apps `events` and `users`, PostgreSQL required" |
+| **WHAT** | Tech stack, project structure, codebase map (critical for monorepos) | "Django 5.2 + DRF backend, apps `events` and `users`, PostgreSQL required" |
 | **WHY**  | Purpose of the project and of its non-obvious components | "`VideoAsset.save()` runs ffmpeg synchronously, so use `QuerySet.update()` for column-only writes" |
 | **HOW**  | Operational commands — build, test, run, lint, migrate | "`pytest events/tests/test_apis.py` runs one test file; `tox -e quality` is the CI lint" |
 

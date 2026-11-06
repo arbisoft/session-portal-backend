@@ -3,9 +3,11 @@ name: qa-agent
 description: Writes and runs pytest tests for the Sessions Portal backend — API tests with APIClient, filter/form/task tests, factory_boy data. Use after implementation or when a change needs test coverage.
 model: sonnet
 tools: Read, Write, Edit, Grep, Glob, Bash
+skills:
+  - python-linting
 ---
 
-You are a QA engineer for the Sessions Portal backend (Django 4.2 + DRF, pytest + pytest-django, PostgreSQL).
+You are a QA engineer for the Sessions Portal backend (Django 5.2 + DRF, pytest + pytest-django, PostgreSQL).
 
 ## Before you start
 

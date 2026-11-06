@@ -81,7 +81,5 @@ Clean — no backend findings.
 
 - Do NOT search the repo for duplicate helpers — that is `util-reuse-agent`. Flag only an obvious duplicate inside the same module.
 - Do NOT write code fixes. Describe them.
-- Do NOT flag what pylint/pycodestyle/isort already catch — CI does.
 - Do NOT restate rule files. Link to them.
-- Do NOT suggest `try/except` unless there is a real error-handling gap.
 - Do NOT review pre-existing code the diff does not touch.

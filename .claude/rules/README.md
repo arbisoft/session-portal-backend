@@ -1,7 +1,8 @@
 # Rules
 
-Coding standards for the Sessions Portal backend (Django 4.2 + DRF, apps `events` and `users`).
+Coding standards for the Sessions Portal backend (Django 5.2 + DRF, apps `events` and `users`).
 `CLAUDE.md` at the repo root covers commands and architecture; these files cover how to write and review changes.
+Each file except `README.md` and `branching.md` has `paths:` frontmatter and loads only when matching files are read or edited. Keep each fact in one place; `config-maintainer-agent` audits for drift and duplication (`/config-maintain`).
 
 | File | Scope |
 |------|-------|

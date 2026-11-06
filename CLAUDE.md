@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project
 
 Django 4.2 + DRF backend for Arbisoft's internal "Sessions Portal" (recorded sessions/events with video, tags, playlists, presenters). Python 3.12, PostgreSQL required (uses `django.contrib.postgres` trigram search, so SQLite won't work). Celery + Redis are used only for Google Drive video imports.
@@ -62,7 +60,17 @@ Staff first `POST /videoassets/` (multipart upload → `VideoAsset` with no even
 
 ## Conventions
 
-- Line length 120; isort sections are `FUTURE, STDLIB, THIRDPARTY, DJANGO, FIRSTPARTY, LOCALFOLDER` (Django imports are their own block between third-party and first-party). Migrations are excluded from lint.
-- pylint runs with `pylint_django`; `max-args = 5`, `max-locals = 15`, `max-branches = 12`.
-- Logger name is `asp_api` (writes `api.log` / `api_error.log` in the working directory).
+Style (line length, import order, pylint limits) is enforced by `tox -e quality`; run it rather than memorising it. Detailed standards live in `.claude/rules/` (most load automatically when you touch matching files) — read the matching file before the work:
+
+| File | Read before |
+|------|-------------|
+| `backend-django.md` | views, serializers, models, queries, migrations, Celery tasks |
+| `backend-python.md` | any Python change (naming, comments, error handling, logging) |
+| `testing.md` | writing or changing tests |
+| `security.md` | auth, permissions, uploads, input validation |
+| `branching.md` | commits and PRs |
+
+- Use `logging.getLogger("asp_api")` — the only logger with handlers (`api.log` / `api_error.log`).
+- Claude config (`.claude/`, this file) must track the code: after a feature or review run `/config-maintain`; `python3 .claude/scripts/audit_config.py` is the quick drift check.
 - `DATABASE_DESIGN.md` has the ER diagram of the schema; update it in the same change as a model change.
+- **Confirm with the user before changing** `users/v1/views.py` login flows, `GoogleUserInfoService`, `users/permissions.py`, or JWT/CORS/`ALLOWED_HOSTS`/`ALLOW_ONLY_INTERNAL_USERS` settings.

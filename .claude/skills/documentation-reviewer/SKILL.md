@@ -1,6 +1,6 @@
 ---
 name: documentation-reviewer
-description: Review the Sessions Portal backend's documentation (README.md, CLAUDE.md, DATABASE_DESIGN.md, .claude/rules/, PR template) against the actual Django 4.2 + DRF code, tooling config, and generated OpenAPI schema, and repair gaps that are missing, incomplete, inaccurate, or unclearly worded. Checks wording, grammar, and terminology consistency in addition to factual accuracy. Runs automatically as documentation-generator's final step, or standalone for a scored health check. Self-heals its own SKILL.md when the file lists or facts it cites drift from the repo.
+description: Review the Sessions Portal backend's documentation (README.md, CLAUDE.md, DATABASE_DESIGN.md, .claude/rules/, PR template) against the actual Django 5.2 + DRF code, tooling config, and generated OpenAPI schema, and repair gaps that are missing, incomplete, inaccurate, or unclearly worded. Checks wording, grammar, and terminology consistency in addition to factual accuracy. Runs automatically as documentation-generator's final step, or standalone for a scored health check. Self-heals its own SKILL.md when the file lists or facts it cites drift from the repo.
 user-invocable: true
 ---
 
@@ -117,7 +117,7 @@ Confirm these still hold before relying on them. If one is false, fix this secti
 
 ```
 Project: Arbisoft Sessions Portal backend
-Type: REST API (Django 4.2 + DRF), PostgreSQL required (django.contrib.postgres, pg_trgm). No frontend in this repo.
+Type: REST API (Django 5.2 + DRF), PostgreSQL required (django.contrib.postgres, pg_trgm). No frontend in this repo.
 Apps: users (no models; django.contrib.auth.User), events (Event, Tag, Playlist, VideoAsset, EventPresenter)
 API: /api/v1/users/, /api/v1/events/; generated docs at /api/schema/, /api/docs/, /api/redoc/ (drf-spectacular)
 Auth: JWT (simplejwt) + session auth; IsAuthenticated default; Google OAuth token or email/password login
@@ -327,7 +327,7 @@ Verify:
 - [ ] Every documented endpoint exists with the stated method and auth
 - [ ] Every model, field, and relation named matches `events/models.py` and migrations
 - [ ] No doc names a file, folder, or class that is gone (`git status` for `D`/`R`)
-- [ ] `README.md` and `CLAUDE.md` do not contradict each other or `.claude/rules/`
+- [ ] `README.md` and `CLAUDE.md` do not contradict each other or `.claude/rules/` <!-- audit:keep -->
 - [ ] `.claude/rules/README.md` indexes every rules file
 - [ ] Links resolve; no secrets or `.env` values appear in any doc
 - [ ] Every doc touched also got the Wording, Grammar, Clarity & Consistency pass

@@ -1,6 +1,6 @@
 ---
 name: documentation-generator
-description: Use when a change to the Sessions Portal backend (Django 4.2 + DRF, apps `events` and `users`) makes README.md, CLAUDE.md, DATABASE_DESIGN.md, or `.claude/rules/` inaccurate, or when auditing them for gaps - setup, environment variables, commands, architecture, data model, business rules, Celery/ffmpeg/Docker requirements, and contribution workflow. Derives every claim from the code, tooling config, and generated OpenAPI schema, then automatically hands off to documentation-reviewer for a wording/accuracy pass before finishing. Self-heals its own file map when the repo's documentation layout changes.
+description: Use when a change to the Sessions Portal backend (Django 5.2 + DRF, apps `events` and `users`) makes README.md, CLAUDE.md, DATABASE_DESIGN.md, or `.claude/rules/` inaccurate, or when auditing them for gaps - setup, environment variables, commands, architecture, data model, business rules, Celery/ffmpeg/Docker requirements, and contribution workflow. Derives every claim from the code, tooling config, and generated OpenAPI schema, then automatically hands off to documentation-reviewer for a wording/accuracy pass before finishing. Self-heals its own file map when the repo's documentation layout changes.
 ---
 
 # Documentation Generator
@@ -233,7 +233,7 @@ In the final message, list the files changed with one line each, any code-level 
 
 - README lets a new developer get from clone to passing tests and lint without guessing
 - Every command, path, env var, setting value, and endpoint named in the docs was checked against code in this run
-- `README.md` and `CLAUDE.md` do not contradict each other or `.claude/rules/`
+- `README.md` and `CLAUDE.md` do not contradict each other or `.claude/rules/` <!-- audit:keep -->
 - `.claude/rules/README.md` indexes every rules file
 - Code-level problems found along the way are reported, not hidden in the docs
 - `documentation-reviewer` has run on this pass's changes and its findings are applied
