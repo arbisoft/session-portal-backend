@@ -46,6 +46,7 @@ services:
     volumes:
       - .:/app
       - ./media:/app/arbisoft_sessions_portal/media
+      - asp-uploads:/app/arbisoft_sessions_portal/uploads_tmp
     ports:
       - "${DJANGO_PORT}:${DJANGO_PORT}"
     depends_on:
@@ -64,6 +65,9 @@ services:
     build:
       context: .
       target: app
+      args:
+        UID: ${UID}
+        GID: ${GID}
     command: celery -A arbisoft_sessions_portal worker -l info --logfile celery.log
     depends_on:
       redis:
@@ -71,6 +75,7 @@ services:
     volumes:
       - .:/app
       - ./media:/app/arbisoft_sessions_portal/media
+      - asp-uploads:/app/arbisoft_sessions_portal/uploads_tmp
     networks:
       - asp-network
 
@@ -80,6 +85,9 @@ services:
     build:
       context: .
       target: app
+      args:
+        UID: ${UID}
+        GID: ${GID}
     command: celery -A arbisoft_sessions_portal beat -l info -s /tmp/celerybeat-schedule
     depends_on:
       redis:
@@ -128,6 +136,7 @@ services:
 
 volumes:
   asp-data:
+  asp-uploads:
 
 networks:
   asp-network:

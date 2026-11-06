@@ -181,21 +181,21 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
 }
 
-GIB = 1024 ** 3
-MIB = 1024 ** 2
+_GIB = 1024 ** 3
+_MIB = 1024 ** 2
 
-# Resumable uploads. Partial files live on the shared media volume so any web or Celery worker can continue them.
-RESUMABLE_UPLOAD_ROOT = Path(os.getenv("RESUMABLE_UPLOAD_ROOT", MEDIA_ROOT / 'uploads'))
-RESUMABLE_UPLOAD_MAX_FILE_BYTES = int(os.getenv("RESUMABLE_UPLOAD_MAX_FILE_BYTES", 20 * GIB))
-RESUMABLE_UPLOAD_CHUNK_BYTES = int(os.getenv("RESUMABLE_UPLOAD_CHUNK_BYTES", 8 * MIB))
+# Resumable uploads. Partial files live on a shared volume outside MEDIA_ROOT, which DEBUG serves publicly.
+RESUMABLE_UPLOAD_ROOT = Path(os.getenv("RESUMABLE_UPLOAD_ROOT", BASE_DIR / 'uploads_tmp'))
+RESUMABLE_UPLOAD_MAX_FILE_BYTES = int(os.getenv("RESUMABLE_UPLOAD_MAX_FILE_BYTES", str(20 * _GIB)))
+RESUMABLE_UPLOAD_CHUNK_BYTES = int(os.getenv("RESUMABLE_UPLOAD_CHUNK_BYTES", str(8 * _MIB)))
 # Hard per-request cap. Any reverse proxy in front of Django must accept request bodies at least this large.
-RESUMABLE_UPLOAD_MAX_CHUNK_BYTES = int(os.getenv("RESUMABLE_UPLOAD_MAX_CHUNK_BYTES", 16 * MIB))
-RESUMABLE_UPLOAD_SESSION_TTL_HOURS = int(os.getenv("RESUMABLE_UPLOAD_SESSION_TTL_HOURS", 72))
-RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER = int(os.getenv("RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER", 3))
-RESUMABLE_UPLOAD_MIN_FREE_BYTES = int(os.getenv("RESUMABLE_UPLOAD_MIN_FREE_BYTES", 1 * GIB))
-RESUMABLE_UPLOAD_FINALIZE_STALE_MINUTES = int(os.getenv("RESUMABLE_UPLOAD_FINALIZE_STALE_MINUTES", 30))
-RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS = int(os.getenv("RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS", 6))
-RESUMABLE_UPLOAD_RETENTION_DAYS = int(os.getenv("RESUMABLE_UPLOAD_RETENTION_DAYS", 7))
+RESUMABLE_UPLOAD_MAX_CHUNK_BYTES = int(os.getenv("RESUMABLE_UPLOAD_MAX_CHUNK_BYTES", str(16 * _MIB)))
+RESUMABLE_UPLOAD_SESSION_TTL_HOURS = int(os.getenv("RESUMABLE_UPLOAD_SESSION_TTL_HOURS", "72"))
+RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER = int(os.getenv("RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER", "3"))
+RESUMABLE_UPLOAD_MIN_FREE_BYTES = int(os.getenv("RESUMABLE_UPLOAD_MIN_FREE_BYTES", str(1 * _GIB)))
+RESUMABLE_UPLOAD_FINALIZE_STALE_MINUTES = int(os.getenv("RESUMABLE_UPLOAD_FINALIZE_STALE_MINUTES", "30"))
+RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS = int(os.getenv("RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS", "6"))
+RESUMABLE_UPLOAD_RETENTION_DAYS = int(os.getenv("RESUMABLE_UPLOAD_RETENTION_DAYS", "7"))
 
 # Throttle counters must be shared by every web worker, so the cache lives in Redis (db 1; Celery uses db 0).
 CACHES = {
@@ -278,7 +278,7 @@ LOGGING = {
     },
 }
 
-# Error monitoring; the client is initialised in EventsConfig.ready().
+# Error monitoring; the client is initialised by init_sentry() from arbisoft_sessions_portal/__init__.py.
 SENTRY_DSN = os.getenv("SENTRY_DSN")
 SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT")
 SENTRY_TRACES_SAMPLE_RATE = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE") or 0.0)

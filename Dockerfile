@@ -37,8 +37,8 @@ COPY . /app/
 
 RUN chmod +x /app/entrypoint.sh
 
-RUN mkdir -p /app/arbisoft_sessions_portal/media \
-    && chown -R app:app /app/arbisoft_sessions_portal/media
+RUN mkdir -p /app/arbisoft_sessions_portal/media /app/arbisoft_sessions_portal/uploads_tmp \
+    && chown -R app:app /app/arbisoft_sessions_portal/media /app/arbisoft_sessions_portal/uploads_tmp
 
 USER app
 

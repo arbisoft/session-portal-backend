@@ -170,3 +170,4 @@ cython_debug/
 local.py
 
 media/
+uploads_tmp/

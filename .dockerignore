@@ -8,6 +8,7 @@ __pycache__/
 
 # Ignore media
 media/
+uploads_tmp/
 
 # Ignore media directory
 media/
