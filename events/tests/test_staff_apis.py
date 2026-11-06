@@ -133,6 +133,18 @@ class TestVideoAssetCreateAPI:
         assert 'video_file' in response.data
         assert not VideoAsset.objects.exists()
 
+    def test_exe_is_rejected_with_allowed_formats(self, staff_client):
+        """ The rejection names the offending extension and lists the allowed ones """
+        upload = {'video_file': SimpleUploadedFile('malware.exe', b'MZ', content_type='application/octet-stream')}
+
+        response = staff_client.post(reverse('video-asset-create'), upload, format='multipart')
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert [str(error) for error in response.data['video_file']] == [
+            "Unsupported file type '.exe'. Allowed formats: avi, mov, mp4, webm."
+        ]
+        assert not VideoAsset.objects.exists()
+
     @pytest.mark.usefixtures('media_storage')
     def test_upload_is_marked_ready_after_processing(self, staff_client):
         """ The upload is processed synchronously, so it must not be left in PROCESSING """

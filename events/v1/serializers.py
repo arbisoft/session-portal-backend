@@ -9,8 +9,17 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.urls import reverse
 
-from events.models import Event, EventPresenter, Playlist, Tag, UploadSession, VideoAsset
-from events.v1.uploads import clean_display_filename, confirmed_offset, validate_video_extension
+from events.models import (
+    Event,
+    EventPresenter,
+    Playlist,
+    Tag,
+    UploadSession,
+    VideoAsset,
+    validate_video_extension,
+    validate_video_filename,
+)
+from events.v1.uploads import clean_display_filename, confirmed_offset
 
 user_model = get_user_model()
 
@@ -141,17 +150,12 @@ class PlaylistListSerializer(serializers.ModelSerializer):
 
 class VideoAssetCreateSerializer(serializers.ModelSerializer):
     """ Serializer for creating a VideoAsset via file upload """
-    video_file = serializers.FileField(required=True)
+    video_file = serializers.FileField(required=True, validators=[validate_video_extension])
 
     class Meta:
         model = VideoAsset
         fields = ('id', 'title', 'video_file', 'status')
         read_only_fields = ('id', 'title', 'status')
-
-    def validate_video_file(self, value):
-        """ Ensure the uploaded file has a supported video extension """
-        validate_video_extension(value.name)
-        return value
 
     def create(self, validated_data):
         """ Create the asset and mark it READY or FAILED """
@@ -252,7 +256,9 @@ class UploadSessionCreateSerializer(serializers.Serializer):
 
     def validate_filename(self, value):
         """ Keep a display-only name and require a supported video extension """
-        return validate_video_extension(clean_display_filename(value))
+        filename = clean_display_filename(value)
+        validate_video_filename(filename)
+        return filename
 
     def validate_file_size(self, value):
         """ Reject files above the configured upload limit """
