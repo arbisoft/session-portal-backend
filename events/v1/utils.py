@@ -1,25 +1,26 @@
-from rest_framework import status
-from rest_framework.response import Response
-
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, QuerySet, Value, When
 from django.shortcuts import get_object_or_404
 
-from events.models import Event
-from events.v1.serializers import UploadSessionSerializer
+from events.models import Event, VideoAsset
 
 
-def media_type(request) -> str:
-    """ Lower-cased request content type without parameters such as ``charset`` """
-    return request.content_type.split(';')[0].strip().lower()
+def event_videos(event_slug: str) -> QuerySet[VideoAsset]:
+    """
+    Videos of the event with this slug, ordered so that the first row is the one the stream endpoint serves.
 
-
-def session_response(session, http_status=status.HTTP_200_OK) -> Response:
-    """ Session representation with the confirmed offset also exposed as a header """
-    data = UploadSessionSerializer(session).data
-    response = Response(data, status=http_status)
-    response['Upload-Offset'] = str(data['offset'])
-    response['Cache-Control'] = 'no-store'
-    return response
+    SQL counterpart of ``Event.playable_video`` (``first_video(only_playable=True)``) only; ``first_video()`` without
+    an argument ignores whether a video has a file. Within one event a video with a file beats one without, then
+    the lowest video pk wins. Slugs are not unique and rows are ordered by event pk first, so with duplicate slugs
+    this skips to a later event when the lowest-pk event has no videos, whereas ``VideoAssetStreamView`` takes
+    the first event with that slug and returns 404 if it has no playable video. Callers take ``.first()`` (or a
+    ``[:1]`` subquery) instead of ``get_object_or_404`` so duplicates never raise ``MultipleObjectsReturned``.
+    """
+    without_file = Case(
+        When(Q(video_file__isnull=True) | Q(video_file=''), then=Value(1)),
+        default=Value(0),
+        output_field=IntegerField(),
+    )
+    return VideoAsset.objects.filter(event__slug=event_slug).order_by('event_id', without_file, 'pk')
 
 
 def get_similar_events(event_slug: str) -> list[Event]:
@@ -39,8 +40,9 @@ def get_similar_events(event_slug: str) -> list[Event]:
     if event.tags.exists():
         similarity_query |= Q(tags__in=event.tags.all())
 
-    similar_events = Event.objects.filter(exclude_current & similarity_query & published_filter).distinct()
-    latest_events = Event.objects.filter(exclude_current & published_filter).order_by('-event_time')[:5]
+    cards = Event.objects.with_card_data()
+    similar_events = cards.filter(exclude_current & similarity_query & published_filter).distinct()
+    latest_events = cards.filter(exclude_current & published_filter).order_by('-event_time')[:5]
 
     combined_events = list(similar_events) + list(latest_events)
     unique_events = {event.id: event for event in combined_events}.values()

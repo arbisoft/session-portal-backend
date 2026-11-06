@@ -24,7 +24,7 @@ from uuid import UUID
 from celery import current_app
 from kombu.exceptions import OperationalError as BrokerError
 from rest_framework import status
-from rest_framework.exceptions import APIException, ValidationError
+from rest_framework.exceptions import APIException
 
 from django.conf import settings
 from django.db import IntegrityError, OperationalError, transaction
@@ -32,7 +32,7 @@ from django.db.models import F, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
-from events.models import ALLOWED_VIDEO_EXTENSIONS, UploadSession, VideoAsset
+from events.models import UploadSession, VideoAsset
 
 logger = logging.getLogger("asp_api")
 
@@ -42,6 +42,10 @@ READ_BLOCK_BYTES = 1024 * 1024
 SIGNATURE_BYTES = 12
 ORPHAN_GRACE_SECONDS = 3600
 FINALIZE_TIMEOUT_ERROR = "finalize_timeout"
+SIZE_MISMATCH_ERROR = "size_mismatch"
+INVALID_SIGNATURE_ERROR = "invalid_file_signature"
+CHECKSUM_MISMATCH_ERROR = "checksum_mismatch"
+PROCESSING_FAILED_ERROR = "processing_failed"
 QUICKTIME_ATOMS = (b"ftyp", b"moov", b"mdat", b"free", b"wide", b"skip", b"pnot")
 WEBM_MAGIC = b"\x1a\x45\xdf\xa3"
 LOCK_NOT_AVAILABLE_SQLSTATE = "55P03"
@@ -92,16 +96,6 @@ def clean_display_filename(raw_name: str) -> str:
 def file_extension(filename: str) -> str:
     """ Lower-case extension without the dot """
     return os.path.splitext(filename)[1].lower().lstrip(".")
-
-
-def validate_video_extension(filename: str) -> str:
-    """ Return ``filename`` unchanged if it has a supported video extension, otherwise raise a validation error """
-    extension = file_extension(filename)
-    if extension not in ALLOWED_VIDEO_EXTENSIONS:
-        raise ValidationError(
-            f"Unsupported file type '.{extension}'. Allowed formats: {', '.join(sorted(ALLOWED_VIDEO_EXTENSIONS))}."
-        )
-    return filename
 
 
 def final_storage_name(session: UploadSession) -> str:
@@ -314,7 +308,7 @@ def _stream_to_file(path: Path, session: UploadSession, chunk: ChunkRequest) -> 
                 header += data[:SIGNATURE_BYTES - len(header)]
                 if len(header) == SIGNATURE_BYTES and not has_valid_signature(header, extension):
                     raise UploadAPIError(
-                        "invalid_file_signature", "The file content does not match its extension.",
+                        INVALID_SIGNATURE_ERROR, "The file content does not match its extension.",
                         status.HTTP_422_UNPROCESSABLE_ENTITY,
                     )
             handle.write(data)
@@ -332,7 +326,7 @@ def _write_chunk(session: UploadSession, chunk: ChunkRequest) -> None:
         digest = _stream_to_file(path, session, chunk)
         if chunk.checksum_sha256 and digest != chunk.checksum_sha256:
             raise UploadAPIError(
-                "checksum_mismatch", "The chunk checksum does not match its content.",
+                CHECKSUM_MISMATCH_ERROR, "The chunk checksum does not match its content.",
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
     except UploadAPIError:
@@ -444,18 +438,18 @@ def _verification_failure(session: UploadSession, source: Optional[Path]) -> str
         logger.error(
             "upload_file_missing session=%s expected=%d part_root=%s", session.id, session.file_size, upload_root()
         )
-        return "size_mismatch"
+        return SIZE_MISMATCH_ERROR
     if source.stat().st_size != session.file_size:
         logger.error(
             "upload_size_mismatch session=%s expected=%d on_disk=%d", session.id, session.file_size,
             source.stat().st_size,
         )
-        return "size_mismatch"
+        return SIZE_MISMATCH_ERROR
     with open(source, "rb") as handle:
         if not has_valid_signature(handle.read(SIGNATURE_BYTES), file_extension(session.filename)):
-            return "invalid_file_signature"
+            return INVALID_SIGNATURE_ERROR
     if session.checksum_sha256 and _hash_file(source) != session.checksum_sha256:
-        return "checksum_mismatch"
+        return CHECKSUM_MISMATCH_ERROR
     return ""
 
 
@@ -463,7 +457,7 @@ def _fail_session(session: UploadSession, error_code: str) -> None:
     session.status = UploadSession.UploadStatus.FAILED
     session.error_code = error_code
     session.save(update_fields=["status", "error_code", "modified"])
-    _remove_part(session.id)
+    transaction.on_commit(partial(_remove_part, session.id))
     logger.error("upload_session_failed session=%s reason=%s", session.id, error_code)
 
 
@@ -473,6 +467,22 @@ def _remove_promoted_file(session: UploadSession) -> None:
         Path(asset_video_storage().path(final_storage_name(session))).unlink(missing_ok=True)
     except OSError:
         logger.exception("upload_promoted_remove_failed session=%s", session.id)
+
+
+def _remove_thumbnail(thumbnail_name: str) -> None:
+    try:
+        VideoAsset.thumbnail.field.storage.delete(thumbnail_name)
+    except OSError:
+        logger.exception("upload_thumbnail_remove_failed name=%s", thumbnail_name)
+
+
+def _discard_failed_asset(session: UploadSession, asset: VideoAsset) -> None:
+    """ Delete the asset row of a file ffmpeg could not process and, once committed, its video and thumbnail """
+    thumbnail_name = asset.thumbnail.name
+    asset.delete()
+    transaction.on_commit(partial(_remove_promoted_file, session))
+    if thumbnail_name:
+        transaction.on_commit(partial(_remove_thumbnail, thumbnail_name))
 
 
 def _promote_file(session: UploadSession, source: Path) -> str:
@@ -511,13 +521,14 @@ def finalize_session(session_id: UUID) -> Optional[UploadSession]:
             return session
 
         asset = _create_asset(session, _promote_file(session, source))
+        if asset.status != VideoAsset.VideoStatus.READY:
+            _discard_failed_asset(session, asset)
+            _fail_session(session, PROCESSING_FAILED_ERROR)
+            return session
+
         session.video_asset = asset
-        if asset.status == VideoAsset.VideoStatus.READY:
-            session.status = UploadSession.UploadStatus.COMPLETED
-        else:
-            session.status = UploadSession.UploadStatus.FAILED
-            session.error_code = "processing_failed"
-        session.save(update_fields=["video_asset", "status", "error_code", "modified"])
+        session.status = UploadSession.UploadStatus.COMPLETED
+        session.save(update_fields=["video_asset", "status", "modified"])
 
     logger.info("upload_session_finalized session=%s result=%s", session.id, session.status)
     return session
@@ -588,9 +599,12 @@ def _remove_orphan_parts(now) -> int:
         try:
             if now.timestamp() - path.stat().st_mtime < ORPHAN_GRACE_SECONDS:
                 continue
+            path.unlink(missing_ok=True)
         except FileNotFoundError:
             continue
-        path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("upload_orphan_remove_failed file=%s", path.name)
+            continue
         removed += 1
     return removed
 

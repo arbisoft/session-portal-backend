@@ -7,11 +7,15 @@ from PIL import Image
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from django.core.files.storage import FileSystemStorage
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from events.factories import EventFactory, PlaylistFactory, TagFactory, UserFactory, VideoAssetFactory
 from events.models import Event, EventPresenter, Tag, VideoAsset
+from events.tests.test_apis import make_playable
 from events.v1.serializers import EventCreateSerializer
 
 
@@ -97,6 +101,54 @@ class TestIncrementViewCountAPI:
         response = user_client.post(reverse('video-asset-increment-view', args=['missing']))
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert not VideoAsset.objects.exists()
+
+    def test_anonymous_is_rejected(self):
+        """ Counting a view requires authentication """
+        response = APIClient().post(reverse('video-asset-increment-view', args=['talk']))
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_duplicate_slug_counts_playable_asset(self, user_client):
+        """ Within the first event the playable video with the lowest pk is counted, not the others """
+        event = EventFactory(slug='talk')
+        unplayable = VideoAssetFactory(event=event)
+        first_playable = VideoAssetFactory(event=event)
+        second_playable = VideoAssetFactory(event=event)
+        make_playable(first_playable, second_playable)
+        EventFactory(slug='talk')
+
+        response = user_client.post(reverse('video-asset-increment-view', args=['talk']))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == {'view_count': 1}
+        counts = dict(VideoAsset.objects.values_list('pk', 'view_count'))
+        assert counts == {unplayable.pk: 0, first_playable.pk: 1, second_playable.pk: 0}
+
+    def test_duplicate_slug_prefers_lowest_event(self, user_client):
+        """ The event with the lowest pk is counted when several share the slug """
+        older_asset = VideoAssetFactory(event=EventFactory(slug='talk'))
+        newer_asset = VideoAssetFactory(event=EventFactory(slug='talk'))
+        make_playable(newer_asset)
+
+        response = user_client.post(reverse('video-asset-increment-view', args=['talk']))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == {'view_count': 1}
+        assert VideoAsset.objects.get(pk=older_asset.pk).view_count == 1
+        assert VideoAsset.objects.get(pk=newer_asset.pk).view_count == 0
+
+    def test_increment_runs_two_queries(self, user_client, django_assert_num_queries):
+        """ One update resolves and increments the asset, one read returns the new value """
+        video_asset = VideoAssetFactory(event=EventFactory(slug='talk'))
+        VideoAssetFactory(event=EventFactory(slug='talk'))
+
+        with django_assert_num_queries(2):
+            response = user_client.post(reverse('video-asset-increment-view', args=['talk']))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == {'view_count': 1}
+        assert VideoAsset.objects.get(pk=video_asset.pk).view_count == 1
 
 
 @pytest.mark.django_db
@@ -129,6 +181,18 @@ class TestVideoAssetCreateAPI:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert 'video_file' in response.data
+        assert not VideoAsset.objects.exists()
+
+    def test_exe_is_rejected_with_allowed_formats(self, staff_client):
+        """ The rejection names the offending extension and lists the allowed ones """
+        upload = {'video_file': SimpleUploadedFile('malware.exe', b'MZ', content_type='application/octet-stream')}
+
+        response = staff_client.post(reverse('video-asset-create'), upload, format='multipart')
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert [str(error) for error in response.data['video_file']] == [
+            "Unsupported file type '.exe'. Allowed formats: avi, mov, mp4, webm."
+        ]
         assert not VideoAsset.objects.exists()
 
     @pytest.mark.usefixtures('media_storage')
@@ -278,6 +342,40 @@ class TestEventCreateAPI:
         assert list(event.playlists.all()) == [playlist]
         assert list(event.presenters.all()) == [presenter]
 
+    def test_response_queries_independent_of_presenters(self, staff_client, monkeypatch):
+        """ Building the 201 body costs the same queries for 1 presenter as for 3, with the same shape """
+        counts = []
+        real_to_representation = EventCreateSerializer.to_representation
+
+        def counting_to_representation(serializer, instance):
+            with CaptureQueriesContext(connection) as captured:
+                data = real_to_representation(serializer, instance)
+            counts.append(len(captured))
+            return data
+
+        monkeypatch.setattr(EventCreateSerializer, 'to_representation', counting_to_representation)
+        responses = []
+        for presenter_count in (1, 3):
+            presenters = UserFactory.create_batch(presenter_count)
+            response = staff_client.post(
+                reverse('event-create'),
+                self.payload(VideoAssetFactory(event=None).id, presenter_ids=[user.id for user in presenters]),
+                format='json',
+            )
+            assert response.status_code == status.HTTP_201_CREATED
+            responses.append((response, presenters))
+
+        assert len(counts) == 2
+        assert counts[0] == counts[1]
+        for response, presenters in responses:
+            assert response.data['title'] == 'Intro to Django'
+            assert response.data['status'] == Event.EventStatus.PUBLISHED
+            assert set(response.data['publisher']) == {'id', 'first_name', 'last_name'}
+            assert sorted(response.data['presenters'], key=lambda item: item['user_id']) == [
+                {'user_id': user.id, 'first_name': user.first_name, 'last_name': user.last_name, 'email': user.email}
+                for user in sorted(presenters, key=lambda user: user.id)
+            ]
+
     def test_unknown_presenter_is_rejected_without_writes(self, staff_client):
         """ A nonexistent presenter must fail validation before anything is created """
         video_asset = VideoAssetFactory(event=None)
@@ -357,6 +455,7 @@ class TestEventCreateAPI:
         assert video_asset.duration == 90
         assert video_asset.thumbnail.name == generated_thumbnail
 
+    @pytest.mark.django_db(transaction=True)
     @pytest.mark.usefixtures('media_storage')
     def test_uploaded_thumbnail_replaces_generated(self, staff_client):
         """ A thumbnail sent with the event is stored without reprocessing the video """
@@ -376,6 +475,49 @@ class TestEventCreateAPI:
         assert video_asset.duration == 90
         assert video_asset.thumbnail.name.startswith('cover')
         assert video_asset.thumbnail.storage.exists(video_asset.thumbnail.name)
+
+    def test_uploaded_thumbnail_waits_for_commit(
+        self, staff_client, media_storage, django_capture_on_commit_callbacks
+    ):
+        """ The cover is only queued as an on_commit callback, so nothing is stored while the transaction is open """
+        video_asset = self.processed_video_asset()
+        generated_thumbnail = video_asset.thumbnail.name
+
+        with django_capture_on_commit_callbacks() as callbacks:
+            response = staff_client.post(
+                reverse('event-create'),
+                self.payload(video_asset.id, thumbnail=self.thumbnail_image()),
+                format='multipart',
+            )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        video_asset.refresh_from_db()
+        assert video_asset.event_id == response.data['id']
+        assert video_asset.thumbnail.name == generated_thumbnail
+        assert len(callbacks) == 1
+        assert not list((media_storage / 'thumbnail').glob('cover*'))
+
+    @pytest.mark.django_db(transaction=True)
+    @pytest.mark.usefixtures('media_storage')
+    def test_thumbnail_write_failure_keeps_event(self, staff_client, caplog):
+        """ A storage error while writing the cover is logged and the event keeps the generated thumbnail """
+        video_asset = self.processed_video_asset()
+        generated_thumbnail = video_asset.thumbnail.name
+
+        with patch.object(FileSystemStorage, '_save', side_effect=OSError('disk full')):
+            with caplog.at_level('ERROR', logger='asp_api'):
+                response = staff_client.post(
+                    reverse('event-create'),
+                    self.payload(video_asset.id, thumbnail=self.thumbnail_image()),
+                    format='multipart',
+                )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Event.objects.filter(pk=response.data['id']).exists()
+        video_asset.refresh_from_db()
+        assert video_asset.event_id == response.data['id']
+        assert video_asset.thumbnail.name == generated_thumbnail
+        assert f'event_thumbnail_store_failed asset={video_asset.pk}' in caplog.text
 
     def test_failure_after_event_creation_rolls_back(self, staff_client):
         """ A failure part way through must not leave a half-created event behind """

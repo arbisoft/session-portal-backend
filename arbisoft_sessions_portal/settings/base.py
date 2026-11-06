@@ -197,6 +197,9 @@ RESUMABLE_UPLOAD_FINALIZE_STALE_MINUTES = int(os.getenv("RESUMABLE_UPLOAD_FINALI
 RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS = int(os.getenv("RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS", "6"))
 RESUMABLE_UPLOAD_RETENTION_DAYS = int(os.getenv("RESUMABLE_UPLOAD_RETENTION_DAYS", "7"))
 
+# Caption files are served from MEDIA_URL in debug and read by the player, so they stay small.
+CAPTIONS_MAX_FILE_BYTES = int(os.getenv("CAPTIONS_MAX_FILE_BYTES", str(2 * _MIB)))
+
 # Throttle counters must be shared by every web worker, so the cache lives in Redis (db 1; Celery uses db 0).
 CACHES = {
     'default': {
