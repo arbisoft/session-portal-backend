@@ -5,10 +5,11 @@ from rest_framework.test import APIClient
 
 from django.contrib.auth import get_user_model
 from django.urls import reverse
+from django.utils import timezone
 
 from events.factories import EventFactory, PlaylistFactory, TagFactory, UserFactory, VideoAssetFactory
 from events.models import Event, VideoAsset
-from events.v1.utils import event_videos
+from events.v1.utils import event_videos, get_similar_events
 
 fake = Faker()
 User = get_user_model()
@@ -129,10 +130,119 @@ class TestEventsAPI:
         assert response.status_code == status.HTTP_200_OK
         results = response.data["results"]
         returned_ids = {e["id"] for e in results}
-        assert similar_event.id in returned_ids
-        assert event.id not in returned_ids
-        # Similar events + 5 latest events
-        assert len(results) == 6
+        assert returned_ids == {similar_event.id}
+
+    def test_event_recommendations_ranked_by_relevance(self, user_client):
+        """ Shared playlist outranks shared presenter, which outranks shared tag; the newest event breaks ties """
+        playlist, tag, presenter = PlaylistFactory(), TagFactory(), UserFactory()
+        event = EventFactory()
+        event.playlists.add(playlist)
+        event.tags.add(tag)
+        event.presenters.add(presenter)
+
+        by_tag = EventFactory()
+        by_tag.tags.add(tag)
+        by_presenter = EventFactory()
+        by_presenter.presenters.add(presenter)
+        by_playlist = EventFactory()
+        by_playlist.playlists.add(playlist)
+        by_all = EventFactory()
+        by_all.playlists.add(playlist)
+        by_all.tags.add(tag)
+        by_all.presenters.add(presenter)
+        EventFactory().tags.add(TagFactory())
+        EventFactory(status=Event.EventStatus.DRAFT).tags.add(tag)
+
+        response = user_client.get(reverse("recommendation", args=[event.slug]))
+        assert response.status_code == status.HTTP_200_OK
+        assert [e["id"] for e in response.data["results"]] == [by_all.id, by_playlist.id, by_presenter.id, by_tag.id]
+
+    def test_recommendation_counts_each_share_once(self, user_client):
+        """ Several shared tags and playlists add up once each, however many relations the candidate has """
+        playlists, tags, presenter = PlaylistFactory.create_batch(2), TagFactory.create_batch(2), UserFactory()
+        event = EventFactory()
+        event.playlists.add(*playlists)
+        event.tags.add(*tags)
+        event.presenters.add(presenter)
+
+        shares_all = EventFactory()
+        shares_all.playlists.add(*playlists, PlaylistFactory())
+        shares_all.tags.add(*tags, TagFactory())
+        shares_all.presenters.add(presenter, UserFactory())
+        shares_playlists = EventFactory()
+        shares_playlists.playlists.add(*playlists)
+        shares_tags_and_presenter = EventFactory()
+        shares_tags_and_presenter.tags.add(*tags)
+        shares_tags_and_presenter.presenters.add(presenter)
+
+        relevance = {e.id: e.relevance for e in get_similar_events(event.slug)}
+        assert relevance == {shares_all.id: 10, shares_playlists.id: 6, shares_tags_and_presenter.id: 4}
+
+        response = user_client.get(reverse("recommendation", args=[event.slug]))
+        assert [e["id"] for e in response.data["results"]] == [
+            shares_all.id, shares_playlists.id, shares_tags_and_presenter.id,
+        ]
+
+    def test_recommendation_three_tags_tie_playlist(self, user_client):
+        """ Three shared tags score the same as one shared playlist, so the newer event comes first """
+        now = timezone.now()
+        playlist, tags = PlaylistFactory(), TagFactory.create_batch(3)
+        event = EventFactory()
+        event.playlists.add(playlist)
+        event.tags.add(*tags)
+
+        older_playlist = EventFactory(event_time=now - timezone.timedelta(days=2))
+        older_playlist.playlists.add(playlist)
+        newer_tags = EventFactory(event_time=now - timezone.timedelta(days=1))
+        newer_tags.tags.add(*tags)
+
+        relevance = {e.id: e.relevance for e in get_similar_events(event.slug)}
+        assert relevance == {older_playlist.id: 3, newer_tags.id: 3}
+
+        response = user_client.get(reverse("recommendation", args=[event.slug]))
+        assert [e["id"] for e in response.data["results"]] == [newer_tags.id, older_playlist.id]
+
+    def test_recommendation_tie_same_time_highest_id(self, user_client):
+        """ Equal relevance and event time are ordered by descending id """
+        same_time = timezone.now()
+        tag = TagFactory()
+        event = EventFactory()
+        event.tags.add(tag)
+        first, second = EventFactory(event_time=same_time), EventFactory(event_time=same_time)
+        first.tags.add(tag)
+        second.tags.add(tag)
+
+        response = user_client.get(reverse("recommendation", args=[event.slug]))
+        assert [e["id"] for e in response.data["results"]] == [second.id, first.id]
+
+    def test_event_recommendations_fall_back_to_latest(self, user_client):
+        """ With nothing related, the latest published events are returned instead of an empty list """
+        now = timezone.now()
+        event = EventFactory(event_time=now)
+        others = [EventFactory(event_time=now - timezone.timedelta(days=7 - index)) for index in range(7)]
+        EventFactory(event_time=now + timezone.timedelta(days=1), status=Event.EventStatus.DRAFT)
+        EventFactory(event_time=now + timezone.timedelta(days=2), status=Event.EventStatus.ARCHIVED)
+
+        response = user_client.get(reverse("recommendation", args=[event.slug]))
+        assert response.status_code == status.HTTP_200_OK
+        returned_ids = [e["id"] for e in response.data["results"]]
+        assert returned_ids == [other.id for other in reversed(others)][:5]
+
+    def test_event_recommendations_query_count(self, user_client, django_assert_max_num_queries):
+        """ Serializing a page of recommendations costs a fixed number of queries, whatever the page holds """
+        tag, presenter = TagFactory(), UserFactory()
+        event = EventFactory()
+        event.tags.add(tag)
+        for _ in range(6):
+            related = EventFactory()
+            related.tags.add(tag, TagFactory())
+            related.presenters.add(presenter, UserFactory())
+            VideoAssetFactory.create_batch(2, event=related)
+
+        with django_assert_max_num_queries(8):
+            response = user_client.get(reverse("recommendation", args=[event.slug]))
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data["results"]) == 6
 
 
 def make_playable(*assets):
