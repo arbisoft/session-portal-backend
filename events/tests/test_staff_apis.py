@@ -158,6 +158,57 @@ class TestVideoAssetCreateAPI:
 
 
 @pytest.mark.django_db
+@pytest.mark.usefixtures('media_storage')
+class TestVideoAssetCreateWithStatus:
+    """ Test cases for VideoAsset.create_with_status """
+
+    @staticmethod
+    def video():
+        """ Build a small uploaded mp4 file """
+        return SimpleUploadedFile('session.mp4', b'fake video content', content_type='video/mp4')
+
+    def test_positive_duration_is_ready(self):
+        """ A probed duration marks the asset READY, in memory and in the database """
+        with patch('events.models.ffmpeg', fake_ffmpeg(duration=125.4)):
+            asset = VideoAsset.create_with_status('Talk', self.video())
+
+        assert asset.status == VideoAsset.VideoStatus.READY
+        assert asset.duration == 125
+        asset.refresh_from_db()
+        assert asset.status == VideoAsset.VideoStatus.READY
+        assert asset.title == 'Talk'
+
+    def test_zero_duration_is_failed(self):
+        """ A file that probes to zero seconds is marked FAILED, in memory and in the database """
+        with patch('events.models.ffmpeg', fake_ffmpeg(duration=0)):
+            asset = VideoAsset.create_with_status('Talk', self.video())
+
+        assert asset.status == VideoAsset.VideoStatus.FAILED
+        asset.refresh_from_db()
+        assert asset.status == VideoAsset.VideoStatus.FAILED
+
+    def test_probe_error_is_failed(self):
+        """ An ffmpeg error is logged by save(), leaving duration 0, so the asset is FAILED """
+        broken = fake_ffmpeg(duration=0)
+        broken.probe.side_effect = ffmpeg.Error('ffprobe', b'', b'invalid data')
+
+        with patch('events.models.ffmpeg', broken):
+            asset = VideoAsset.create_with_status('Talk', self.video())
+
+        assert asset.duration == 0
+        assert VideoAsset.objects.get(pk=asset.pk).status == VideoAsset.VideoStatus.FAILED
+
+    def test_file_is_processed_once(self):
+        """ The status is written without a second save(), so ffmpeg probes the file only once """
+        ffmpeg_mock = fake_ffmpeg(duration=60)
+
+        with patch('events.models.ffmpeg', ffmpeg_mock):
+            VideoAsset.create_with_status('Talk', self.video())
+
+        assert ffmpeg_mock.probe.call_count == 1
+
+
+@pytest.mark.django_db
 class TestEventCreateAPI:
     """ Test cases for creating an event """
 

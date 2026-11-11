@@ -1,7 +1,25 @@
+from rest_framework import status
+from rest_framework.response import Response
+
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 
 from events.models import Event
+from events.v1.serializers import UploadSessionSerializer
+
+
+def media_type(request) -> str:
+    """ Lower-cased request content type without parameters such as ``charset`` """
+    return request.content_type.split(';')[0].strip().lower()
+
+
+def session_response(session, http_status=status.HTTP_200_OK) -> Response:
+    """ Session representation with the confirmed offset also exposed as a header """
+    data = UploadSessionSerializer(session).data
+    response = Response(data, status=http_status)
+    response['Upload-Offset'] = str(data['offset'])
+    response['Cache-Control'] = 'no-store'
+    return response
 
 
 def get_similar_events(event_slug: str) -> list[Event]:

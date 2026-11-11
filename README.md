@@ -28,7 +28,7 @@ Setup guide to set up the project from scratch.
     - [Database setup](#database-setup)
     - [Migrate](#migrate)
     - [Run server](#run-server)
-    - [Google Drive imports: Redis and Celery](#google-drive-imports-redis-and-celery)
+    - [Redis and Celery](#redis-and-celery)
     - [Run tests](#run-tests)
     - [Run linting](#run-linting)
   - [Option 2: Set Up Using Docker](#option-2-set-up-using-docker)
@@ -49,7 +49,7 @@ Setup guide to set up the project from scratch.
 | Python 3.12               | Everything                                                                                                     |
 | PostgreSQL 16             | Everything. SQLite does not work: search uses `django.contrib.postgres` trigram similarity                     |
 | ffmpeg                    | Every video upload. `VideoAsset.save()` runs ffmpeg synchronously to read the duration and extract a thumbnail |
-| Redis and a Celery worker | Google Drive video imports only                                                                                |
+| Redis and a Celery worker | Google Drive video imports and finalizing resumable uploads. The single-request upload does not need them     |
 | Docker and docker-compose | Option 2 only                                                                                                  |
 
 ## Set up Environment Variables
@@ -74,6 +74,12 @@ DJANGO_DEBUG=<django debug flag>
 | `DJANGO_SECRET_KEY`                                       | `settings/base.py`                                                                                 | No default. Tests use their own key                                                                                                                                                                                                                                                                                                                                |
 | `DJANGO_DEBUG`                                            | `settings/base.py`                                                                                 | Any non-empty value, including `False`, turns debug on. Leave it unset to turn it off. `ALLOWED_HOSTS` is empty, so `runserver` refuses to start with debug off: set it for local development. Debug also serves `/media/` files                                                                                                                                   |
 | `DJANGO_PORT`                                             | `docker-compose.yml` only                                                                          | Port that `runserver` binds and that the `django` container publishes. With Option 1, `runserver` uses its own default (8000)                                                                                                                                                                                                                                      |
+| `RESUMABLE_UPLOAD_*` | `settings/base.py` | Optional limits and locations for resumable uploads (file size, chunk size, session TTL, partial-file directory). Defaults and meaning are in the Settings table of [UPLOADS.md](UPLOADS.md) |
+| `REDIS_CACHE_URL` | `settings/base.py` | Redis URL of the Django cache that holds the upload throttle counters. Defaults to `redis://redis:6379/1`. See [Redis and Celery](#redis-and-celery) |
+| `SENTRY_DSN` | `settings/base.py` | Sentry error reporting is off when this is unset. Initialised by `arbisoft_sessions_portal/sentry.py` when the project package is imported (web, Celery worker and beat, `manage.py`), from the final `settings.SENTRY_DSN`, so `settings/local.py` can override it and `settings/test.py` sets it to `None` (tests never create a client) |
+| `SENTRY_ENVIRONMENT` | `settings/base.py` | Optional environment name shown in Sentry (for example `production`) |
+| `SENTRY_TRACES_SAMPLE_RATE` | `settings/base.py` | Fraction of requests and tasks traced, from `0.0` to `1.0`. Defaults to `0.0` |
+| `SENTRY_PROFILE_SESSION_SAMPLE_RATE` | `settings/base.py` | Fraction of sessions profiled, from `0.0` to `1.0`. Defaults to `0.0` |
 
 Do not commit `.env` or `local.py`; both are gitignored.
 
@@ -87,7 +93,7 @@ On root of your project run the command
 $ cp arbisoft_sessions_portal/settings/local.example.py arbisoft_sessions_portal/settings/local.py
 ```
 
-`local.py` reads the `DB_*` variables from `.env`. It is also the place to override any other setting for your machine, such as the Celery broker URL (see [Google Drive imports](#google-drive-imports-redis-and-celery)).
+`local.py` reads the `DB_*` variables from `.env`. It is also the place to override any other setting for your machine, such as the Celery broker URL (see [Redis and Celery](#redis-and-celery)).
 
 ## Option 1: Setup Using Virtual Environment
 
@@ -208,9 +214,9 @@ $ python manage.py runserver
 
 `DJANGO_DEBUG` must be set in `.env` (see [Set up Environment Variables](#set-up-environment-variables)), otherwise `runserver` exits with "You must set settings.ALLOWED_HOSTS if DEBUG is False."
 
-### Google Drive imports: Redis and Celery
+### Redis and Celery
 
-Only the Google Drive import needs these: the "Google Drive Link" field on a video asset in the Django admin, and `prepopulate_events`. Uploading a video file does not.
+These are needed by the Google Drive import (the "Google Drive Link" field on a video asset in the Django admin, and `prepopulate_events`) and by resumable uploads, whose finalization step runs as a Celery task. The older single-request upload endpoint does not need them.
 
 Start Redis and a Celery worker:
 
@@ -232,6 +238,8 @@ $ celery -A arbisoft_sessions_portal beat -l info
 CELERY_BROKER_URL = "redis://localhost:6379/0"
 CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
 ```
+
+Throttle counters (including the upload rates) are kept in the Django cache, which `settings/base.py` points at Redis db 1 so every web worker shares them. The default is `redis://redis:6379/1`; set `REDIS_CACHE_URL` (for example `redis://localhost:6379/1`) outside Docker. The test settings use an in-process cache instead.
 
 ### Run tests
 
@@ -270,7 +278,7 @@ Create `.env` and `local.py` as described above, with `DB_HOST=db`. They are not
 
 ### Build and Start Docker Containers
 
-This command will rebuild and start all the services using the configuration defined in docker-compose.yml: `db` (PostgreSQL 16), `redis`, `celery`, and `django`. The `django` container runs `python manage.py migrate` through `entrypoint.sh` before starting the server.
+This command will rebuild and start all the services using the configuration defined in docker-compose.yml: `db` (PostgreSQL 16), `redis`, `celery`, `celery-beat`, and `django`. The `django` container runs `python manage.py migrate` through `entrypoint.sh` before starting the server.
 
 ```bash
 export GID=$(id -g)
@@ -279,6 +287,8 @@ docker-compose up --build
 ```
 
 In bash `UID` is read-only, so `export UID=...` fails. Use `export GID=$(id -g)` followed by `export UID` instead.
+
+Partial resumable uploads are kept in the named volume `asp-uploads`, mounted at `/app/arbisoft_sessions_portal/uploads_tmp` in the `django` and `celery` containers (outside `./media`, which `DEBUG` serves at `/media/`). `docker-compose down -v` deletes that volume and any in-progress uploads with it. The services built from the `Dockerfile` all get the same `UID` and `GID` build args, which keeps the volume writable by both containers.
 
 Once the containers are up, check the API connection by visiting http://localhost:${DJANGO_PORT} to ensure the Django app is running properly.
 
@@ -308,7 +318,7 @@ The API reference is generated from the code (drf-spectacular). With the server 
 - ReDoc: `/api/redoc/`
 - OpenAPI schema: `/api/schema/`
 
-Endpoints live under `/api/v1/users/` and `/api/v1/events/`. Every endpoint requires a JSON Web Token (JWT) or a session login except the two login endpoints; staff-only endpoints also require `is_staff`.
+Endpoints live under `/api/v1/users/` and `/api/v1/events/`. Large-file uploads use the resumable endpoints under `/api/v1/events/videoassets/`, documented in [UPLOADS.md](UPLOADS.md). Every endpoint requires a JSON Web Token (JWT) or a session login except the two login endpoints; staff-only endpoints also require `is_staff`.
 
 ## Django admin
 
@@ -325,9 +335,11 @@ Staff access to the upload and event-creation endpoints is controlled by a user'
 ```bash
 $ python manage.py check_videoasset_status [ASSET_ID ...] [--all] [--recent HOURS] [--processing]
 $ python manage.py prepopulate_events CSV_FILE [--dry-run] [--skip-video-download] [--creator USERNAME]
+$ python manage.py cleanup_upload_sessions
 ```
 
 - `check_videoasset_status` prints the status of video assets. Pass asset IDs, `--all`, or `--recent HOURS`; `--processing` narrows the output to processing and failed assets.
+- `cleanup_upload_sessions` expires abandoned resumable uploads and deletes their leftovers. Celery beat runs it hourly; see [UPLOADS.md](UPLOADS.md).
 - `prepopulate_events` imports events from a CSV with the columns `Title`, `Details`, `Trainer`, `Publish Date`, `Link`, `Playlist`, and `Tags`. It queues the Google Drive downloads on Celery, so Redis and a worker must be running unless you pass `--skip-video-download`. Use `--dry-run` first.
 
 ## CI and deployment
