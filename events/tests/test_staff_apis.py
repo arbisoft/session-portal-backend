@@ -16,7 +16,7 @@ from django.urls import reverse
 from events.factories import EventFactory, PlaylistFactory, TagFactory, UserFactory, VideoAssetFactory
 from events.models import Event, EventPresenter, Tag, VideoAsset
 from events.tests.test_apis import make_playable
-from events.v1.serializers import EventCreateSerializer
+from events.v1.serializers import EVENT_DESCRIPTION_MAX_LENGTH, EventCreateSerializer
 
 
 def fake_ffmpeg(duration):
@@ -341,6 +341,25 @@ class TestEventCreateAPI:
         assert list(event.tags.all()) == [tag]
         assert list(event.playlists.all()) == [playlist]
         assert list(event.presenters.all()) == [presenter]
+
+    @pytest.mark.parametrize('field, limit', [('title', 255), ('description', EVENT_DESCRIPTION_MAX_LENGTH)])
+    def test_text_fields_have_a_maximum_length(self, staff_client, field, limit):
+        """ One character over the limit is refused and nothing is created; exactly the limit is accepted """
+        video_asset = VideoAssetFactory(event=None)
+
+        refused = staff_client.post(
+            reverse('event-create'), self.payload(video_asset.id, **{field: 'x' * (limit + 1)}), format='json'
+        )
+
+        assert refused.status_code == status.HTTP_400_BAD_REQUEST
+        assert field in refused.data
+        assert not Event.objects.exists()
+
+        accepted = staff_client.post(
+            reverse('event-create'), self.payload(video_asset.id, **{field: 'x' * limit}), format='json'
+        )
+
+        assert accepted.status_code == status.HTTP_201_CREATED
 
     def test_response_queries_independent_of_presenters(self, staff_client, monkeypatch):
         """ Building the 201 body costs the same queries for 1 presenter as for 3, with the same shape """

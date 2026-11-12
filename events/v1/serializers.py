@@ -28,6 +28,8 @@ logger = logging.getLogger("asp_api")
 user_model = get_user_model()
 
 VIDEO_ASSET_ASSIGNED_ERROR = 'This video asset is already assigned to an event.'
+# The model's TextField has no limit of its own; this mirrors the 5000-character limit of the frontend upload form.
+EVENT_DESCRIPTION_MAX_LENGTH = 5000
 
 
 def video_stream_path(event_slug: str | None) -> str:
@@ -201,6 +203,7 @@ class EventCreateSerializer(serializers.ModelSerializer):
             'title', 'description', 'event_time', 'playlists', 'tags',
             'presenter_ids', 'video_asset_id', 'thumbnail',
         )
+        extra_kwargs = {'description': {'max_length': EVENT_DESCRIPTION_MAX_LENGTH}}
 
     def validate_video_asset_id(self, value):
         """ Ensure the video is processed and not already assigned to another event """
