@@ -4,6 +4,7 @@ import hashlib
 import threading
 from datetime import timedelta
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,6 +17,7 @@ from django.db import DatabaseError, connection, transaction
 from django.urls import reverse
 from django.utils import timezone
 
+from events.factories import EventFactory
 from events.models import UploadSession, VideoAsset
 from events.tasks import finalize_upload_session
 from events.tests.test_staff_apis import fake_ffmpeg
@@ -649,6 +651,87 @@ class TestUploadStatusAndCancel:
         response = staff_client.delete(reverse('upload-session-detail', args=[session.id]))
 
         assert response.status_code == status.HTTP_409_CONFLICT
+
+
+@pytest.mark.django_db
+class TestRemoveCompletedUpload:
+    """ Remove video after "Upload complete": DELETE on a completed session discards the unused asset """
+
+    @pytest.fixture(autouse=True)
+    def storage(self, media_storage, upload_root):  # pylint: disable=unused-argument
+        """ Keep promoted videos and partial files in temporary directories """
+
+    def completed_session(self, staff_client, session_for, data):
+        """ A session whose bytes were all uploaded and whose file was finalized into an asset """
+        session = session_for(data)
+        upload_in_chunks(staff_client, session.id, data, 128)
+        with patch('events.models.ffmpeg', fake_ffmpeg(90)):
+            finalize_session(session.id)
+        session.refresh_from_db()
+        return session
+
+    def test_removing_completed_upload_deletes_asset(
+        self, staff_client, session_for, media_storage, django_capture_on_commit_callbacks
+    ):
+        """ Remove video after "Upload complete" must not leave an unused asset and video behind """
+        session = self.completed_session(staff_client, session_for, make_video(500))
+        video = media_storage / 'video_file' / f'{session.id}.mp4'
+        assert video.exists()
+
+        with django_capture_on_commit_callbacks(execute=True):
+            response = staff_client.delete(reverse('upload-session-detail', args=[session.id]))
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        session.refresh_from_db()
+        assert session.status == UploadSession.UploadStatus.CANCELLED
+        assert session.video_asset_id is None
+        assert not VideoAsset.objects.exists()
+        assert not video.exists()
+
+    def test_legacy_named_video_is_removed(
+        self, staff_client, session_for, media_storage, django_capture_on_commit_callbacks
+    ):
+        """ The asset's own files go, even when the video is not called after the session id """
+        session = self.completed_session(staff_client, session_for, make_video(500))
+        asset = VideoAsset.objects.get(pk=session.video_asset_id)
+        thumbnail = Path(asset.thumbnail.path)
+        legacy = media_storage / 'video_file' / f'{session.id}.avi'
+        (media_storage / 'video_file' / f'{session.id}.mp4').rename(legacy)
+        VideoAsset.objects.filter(pk=asset.pk).update(video_file=legacy.name)
+        assert legacy.exists()
+        assert thumbnail.exists()
+
+        with django_capture_on_commit_callbacks(execute=True):
+            response = staff_client.delete(reverse('upload-session-detail', args=[session.id]))
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        session.refresh_from_db()
+        assert session.status == UploadSession.UploadStatus.CANCELLED
+        assert not VideoAsset.objects.exists()
+        assert not legacy.exists()
+        assert not thumbnail.exists()
+
+    def test_removing_a_completed_upload_twice_is_harmless(self, staff_client, session_for):
+        """ DELETE stays idempotent once the asset is gone """
+        session = self.completed_session(staff_client, session_for, make_video(500))
+        url = reverse('upload-session-detail', args=[session.id])
+
+        assert staff_client.delete(url).status_code == status.HTTP_204_NO_CONTENT
+        assert staff_client.delete(url).status_code == status.HTTP_204_NO_CONTENT
+
+    def test_a_video_used_by_an_event_cannot_be_removed(self, staff_client, session_for, media_storage):
+        """ Once published, the asset belongs to the event and the upload endpoint must not delete it """
+        session = self.completed_session(staff_client, session_for, make_video(500))
+        VideoAsset.objects.filter(pk=session.video_asset_id).update(event=EventFactory())
+
+        response = staff_client.delete(reverse('upload-session-detail', args=[session.id]))
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert response.data['code'] == 'video_in_use'
+        session.refresh_from_db()
+        assert session.status == UploadSession.UploadStatus.COMPLETED
+        assert VideoAsset.objects.filter(pk=session.video_asset_id).exists()
+        assert (media_storage / 'video_file' / f'{session.id}.mp4').exists()
 
 
 @pytest.mark.django_db

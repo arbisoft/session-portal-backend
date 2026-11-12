@@ -385,20 +385,46 @@ def append_chunk(session_id: UUID, owner, chunk: ChunkRequest) -> UploadSession:
     return session
 
 
+def _discard_unused_asset(session: UploadSession) -> None:
+    """
+    Delete the asset a completed upload produced, together with its video and thumbnail files.
+
+    The asset row is locked like Event creation locks it, so a concurrent publish either wins (and the removal is
+    refused here) or loses (and is rejected because the asset is gone). An asset an event already uses is kept.
+    """
+    asset = VideoAsset.objects.select_for_update().filter(pk=session.video_asset_id).first()
+    if asset is None:
+        return
+    if asset.event_id is not None:
+        raise UploadAPIError(
+            "video_in_use", "This video is already used by a session and cannot be removed here.",
+            status.HTTP_409_CONFLICT, upload_status=session.status,
+        )
+    _discard_failed_asset(asset)
+    session.video_asset = None
+
+
 def cancel_session(session_id: UUID, owner) -> UploadSession:
-    """ Cancel an in-progress upload and discard its partial file. Already closed sessions are a no-op """
+    """
+    Cancel an upload and discard what it left on disk. Already closed sessions are a no-op.
+
+    An in-progress upload loses its partial file. A completed one loses its asset and video, unless an event
+    already uses that asset, which is refused with a 409.
+    """
     states = UploadSession.UploadStatus
     with transaction.atomic():
         session = _lock_session(session_id, owner)
         if session.status in (states.CANCELLED, states.EXPIRED, states.FAILED):
             return session
-        if session.status != states.UPLOADING:
+        if session.status == states.COMPLETED:
+            _discard_unused_asset(session)
+        elif session.status != states.UPLOADING:
             raise UploadAPIError(
                 "session_not_active", "This upload can no longer be cancelled.", status.HTTP_409_CONFLICT,
                 upload_status=session.status,
             )
         session.status = states.CANCELLED
-        session.save(update_fields=["status", "modified"])
+        session.save(update_fields=["status", "video_asset", "modified"])
         transaction.on_commit(partial(_remove_part, session.id))
     logger.info("upload_session_cancelled session=%s", session.id)
     return session
