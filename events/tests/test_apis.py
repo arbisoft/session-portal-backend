@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from events.factories import EventFactory, PlaylistFactory, TagFactory, UserFactory, VideoAssetFactory
 from events.models import Event, VideoAsset
+from events.v1.streaming import video_playback_type
 from events.v1.utils import event_videos, get_similar_events
 
 fake = Faker()
@@ -56,6 +57,31 @@ class TestEventsAPI:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["title"] == video_asset.title
         assert response.data["status"] == VideoAsset.VideoStatus.READY
+
+    @pytest.mark.parametrize('filename, expected', [
+        ('talk.mp4', 'video/mp4'),
+        ('talk.MOV', 'video/mp4'),
+        ('talk.webm', 'video/webm'),
+        ('talk.avi', 'video/x-msvideo'),
+        ('talk.unknown', 'video/mp4'),
+    ])
+    def test_video_asset_declares_its_playback_type(self, user_client, filename, expected):
+        """ The player is told the real format of the stored file instead of assuming MP4 """
+        video_asset = VideoAssetFactory()
+        VideoAsset.objects.filter(pk=video_asset.pk).update(video_file=filename)
+
+        response = user_client.get(reverse("video-asset-detail", args=[video_asset.event.slug]))
+
+        assert response.data["video_type"] == expected
+
+    def test_video_type_is_empty_without_a_file(self, user_client):
+        """ No playable video, no type """
+        video_asset = VideoAssetFactory()
+        VideoAsset.objects.filter(pk=video_asset.pk).update(video_file='')
+
+        response = user_client.get(reverse("video-asset-detail", args=[video_asset.event.slug]))
+
+        assert response.data["video_type"] == ''
 
     def test_increment_video_asset_view_count(self, user_client):
         """ Test that POST to view endpoint increments view_count by 1 """
@@ -380,3 +406,24 @@ class TestVideoAssetDetailDuplicateSlugs:
         response = APIClient().get(reverse("video-asset-detail", args=['talk']))
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+class TestVideoPlaybackType:
+    """ The media type a player is told to declare for a stored file """
+
+    @pytest.mark.parametrize('name, expected', [
+        ('talk.mp4', 'video/mp4'),
+        ('talk.mov', 'video/mp4'),
+        ('talk.webm', 'video/webm'),
+        ('talk.unknown', 'video/mp4'),
+    ])
+    def test_known_and_unknown_extensions(self, name, expected):
+        """ MP4 and MOV are declared as MP4, WebM as WebM, anything unrecognised falls back to MP4 """
+        assert video_playback_type(name) == expected
+
+    def test_other_extensions_use_mimetypes(self):
+        """ Extensions without an override fall through to the platform's mimetypes table """
+        result = video_playback_type('talk.avi')
+
+        assert isinstance(result, str)
+        assert result

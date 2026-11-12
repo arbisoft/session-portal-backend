@@ -21,6 +21,7 @@ from events.models import (
     validate_video_extension,
     validate_video_filename,
 )
+from events.v1.streaming import video_playback_type
 from events.v1.uploads import clean_display_filename, confirmed_offset
 
 logger = logging.getLogger("asp_api")
@@ -118,11 +119,12 @@ class VideoAssetSerializer(serializers.ModelSerializer):
 
     event = EventSerializer()
     video_file = serializers.SerializerMethodField()
+    video_type = serializers.SerializerMethodField()
 
     class Meta:
         model = VideoAsset
         fields = (
-            'title', 'video_file', 'duration', 'thumbnail', 'status', 'file_size', 'view_count', 'event',
+            'title', 'video_file', 'video_type', 'duration', 'thumbnail', 'status', 'file_size', 'view_count', 'event',
             'captions_file',
         )
 
@@ -135,6 +137,13 @@ class VideoAssetSerializer(serializers.ModelSerializer):
         """
         event = video_asset.event
         return EventSerializer.get_video_file(event) if event else ''
+
+    @staticmethod
+    def get_video_type(video_asset) -> str:
+        """ Media type the player should declare for ``video_file``; ``''`` when there is no playable video """
+        event = video_asset.event
+        video = event.playable_video() if event else None
+        return video_playback_type(video.video_file.name) if video else ''
 
 
 class TagListSerializer(serializers.ModelSerializer):

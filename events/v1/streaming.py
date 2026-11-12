@@ -16,9 +16,20 @@ from rest_framework.negotiation import BaseContentNegotiation
 from django.http import Http404, HttpResponse, StreamingHttpResponse
 from django.utils.http import http_date, parse_http_date_safe
 
+from events.v1.uploads import file_extension
+
 logger = logging.getLogger("asp_api")
 
 CHUNK_SIZE = 1024 * 1024
+DEFAULT_PLAYBACK_TYPE = 'video/mp4'
+# The type a player should declare, which is not always the file's own MIME type: browsers that cannot name
+# ``video/quicktime`` still play an H.264 MOV when it is declared as the MP4 family it belongs to. The stream response
+# (``_build_response``) deliberately keeps the file's own ``video/quicktime`` header, so the two differ for ``.mov``.
+PLAYBACK_TYPES = {
+    'mp4': 'video/mp4',
+    'mov': 'video/mp4',
+    'webm': 'video/webm',
+}
 RANGE_RE = re.compile(r'^bytes=(\d*)-(\d*)$')
 
 
@@ -33,6 +44,11 @@ class IgnoreClientContentNegotiation(BaseContentNegotiation):
         """ Use the first configured renderer (only error responses are rendered) """
         renderer = renderers[0]
         return renderer, renderer.media_type
+
+
+def video_playback_type(name: str) -> str:
+    """ Media type a player should declare for the stored video file called ``name`` """
+    return PLAYBACK_TYPES.get(file_extension(name)) or mimetypes.guess_type(name)[0] or DEFAULT_PLAYBACK_TYPE
 
 
 def _parse_range(header: str, size: int) -> tuple[int, int] | None:
