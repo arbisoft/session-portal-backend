@@ -195,6 +195,9 @@ RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER = int(os.getenv("RESUMABLE_UPLOAD_MAX_ACTIV
 RESUMABLE_UPLOAD_MIN_FREE_BYTES = int(os.getenv("RESUMABLE_UPLOAD_MIN_FREE_BYTES", str(1 * _GIB)))
 RESUMABLE_UPLOAD_FINALIZE_STALE_MINUTES = int(os.getenv("RESUMABLE_UPLOAD_FINALIZE_STALE_MINUTES", "30"))
 RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS = int(os.getenv("RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS", "6"))
+# Longest a single video conversion may run. Keep it below RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS, after which a
+# session still finalizing is failed.
+VIDEO_TRANSCODE_TIMEOUT_SECONDS = int(os.getenv("VIDEO_TRANSCODE_TIMEOUT_SECONDS", str(5 * 3600)))
 RESUMABLE_UPLOAD_RETENTION_DAYS = int(os.getenv("RESUMABLE_UPLOAD_RETENTION_DAYS", "7"))
 
 # Caption files are served from MEDIA_URL in debug and read by the player, so they stay small.

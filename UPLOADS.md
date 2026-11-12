@@ -47,13 +47,15 @@ Errors are `{"code": ..., "detail": ...}` plus context. Codes the client acts on
 - Crash after the write but before the commit: the file is longer than the committed offset. The next writer truncates the surplus. The client is never told those bytes were accepted.
 - Metadata ahead of disk (partial file lost or shortened): `GET` reports `min(committed offset, bytes on disk)`, and the next `PATCH` lowers the stored offset and answers `offset_mismatch` with the true value.
 - Lost acknowledgement: the chunk is committed, the client did not hear. Its retry gets `409 offset_mismatch` with the new offset, and the client continues from there. Bytes are never appended twice.
-- Finalization (Celery task `events.tasks.finalize_upload_session`) checks the size, the container signature and, if given, the whole-file SHA-256; moves the file to `videos/<session id>.<ext>`; creates the `VideoAsset` (`READY` when ffmpeg finds a duration, otherwise the session fails with `processing_failed` and the asset row, the moved video and its thumbnail are deleted, so `video_asset_id` stays null). It is idempotent: the destination name is deterministic, the asset row and the session update commit together, and concurrent runs skip a locked row. Storage errors are retried with backoff; if a worker dies, `cleanup_upload_sessions` re-queues sessions stuck in `FINALIZING`, and fails them with `finalize_timeout` once they pass `RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS`.
+- Finalization (Celery task `events.tasks.finalize_upload_session`) checks the size, the container signature and, if given, the whole-file SHA-256; converts the file to a browser-playable MP4 (H.264 video, AAC audio; see below) at `videos/<session id>.mp4`; creates the `VideoAsset` (`READY` when ffmpeg finds a duration, otherwise the session fails with `processing_failed` and the asset row, the converted video and its thumbnail are deleted, so `video_asset_id` stays null). It is idempotent: the destination name is deterministic, the asset row and the session update commit together, and concurrent runs skip a locked row. Storage errors are retried with backoff; if a worker dies, `cleanup_upload_sessions` re-queues sessions stuck in `FINALIZING`, and fails them with `finalize_timeout` once they pass `RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS`.
 - Failed verification (`size_mismatch`, `checksum_mismatch`, `invalid_file_signature`) deletes the partial file and fails the session; the client must start a new one.
 
 ## Security
 
 - Session ids are random UUIDs; access is limited to the owner, other users see `404`.
 - The client filename is display-only (directories and control characters stripped). Storage paths are built from the session UUID, never from user input.
+- **Every resumable upload is stored as MP4 (H.264 + AAC)**, whatever it arrived as (`events/v1/transcoding.py`). The multipart upload and the Google Drive import do not convert; `python manage.py convert_videoassets` backfills those and older assets. AVI (MPEG-4), WebM (VP8/VP9), ProRes and HEVC MOV files do not play in every browser, and the player always asks for `video/mp4`. Streams that are already H.264 (4:2:0) or AAC are copied (fast, only repackaged); the others are re-encoded (`libx264` CRF 23, `aac` 160k, odd sizes rounded down to even). The index is moved to the front (`+faststart`) so seeking works while streaming. The conversion runs inside finalization, so the session stays `FINALIZING` ("Processing video…") for as long as it takes, which for a large re-encoded file can be a long time and needs CPU on the worker. The output is renamed into place only when complete; a file ffmpeg cannot read or convert fails the session with `processing_failed`. The partial upload is deleted once the MP4 exists.
+- Videos stored before this change (and the multipart/Drive paths, which do not convert) can be converted with `python manage.py convert_videoassets [--dry-run] [asset ids]`.
 - Extension allow-list (`mp4`, `mov`, `avi`, `webm`), magic-byte check on the first chunk and again at finalization, size cap, per-user active-session cap, free-space check that also accounts for space promised to other sessions.
 - Throttle scopes `upload_create` (30/hour), `upload_chunk` (2000/min), `upload_status` (600/min) in `REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']`. The counters live in Django's default cache, which `settings/base.py` points at Redis db 1 (`REDIS_CACHE_URL`, default `redis://redis:6379/1`), so every web worker shares them and Redis must be reachable. `settings/test.py` uses an in-process cache instead.
 - Nothing logs file contents, tokens or filenames. Log lines carry the session id (`upload_session_created`, `upload_session_finalized`, `upload_session_failed`, `upload_data_loss`, `upload_cleanup`, ...).
@@ -65,7 +67,7 @@ All read from the environment (see `settings/base.py`).
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `RESUMABLE_UPLOAD_ROOT` | `arbisoft_sessions_portal/uploads_tmp` (outside `MEDIA_ROOT`, which is `arbisoft_sessions_portal/media`) | Partial files. Must be shared by every web and Celery worker, and must stay outside `MEDIA_ROOT`, which `DEBUG` serves at `/media/`. Prefer the same filesystem as `MEDIA_ROOT/videos` so promotion is a rename; across filesystems it becomes a copy. |
+| `RESUMABLE_UPLOAD_ROOT` | `arbisoft_sessions_portal/uploads_tmp` (outside `MEDIA_ROOT`, which is `arbisoft_sessions_portal/media`) | Partial files. Must be shared by every web and Celery worker, and must stay outside `MEDIA_ROOT`, which `DEBUG` serves at `/media/`. Finalization always writes a new MP4 into the video storage, whichever volume this one is on. |
 | `RESUMABLE_UPLOAD_MAX_FILE_BYTES` | 20 GiB | Keep the frontend `MAX_VIDEO_FILE_SIZE_BYTES` equal. |
 | `RESUMABLE_UPLOAD_CHUNK_BYTES` | 8 MiB | Recommended chunk size, returned to the client. |
 | `RESUMABLE_UPLOAD_MAX_CHUNK_BYTES` | 16 MiB | Hard per-request cap. |
@@ -74,6 +76,7 @@ All read from the environment (see `settings/base.py`).
 | `RESUMABLE_UPLOAD_MIN_FREE_BYTES` | 1 GiB | Free space kept in reserve. An upload is refused (`507 insufficient_storage`) unless free space, minus space promised to other sessions, minus this reserve, exceeds the file size. Raise it on production hosts. |
 | `RESUMABLE_UPLOAD_FINALIZE_STALE_MINUTES` | 30 | A `FINALIZING` session older than this is re-queued by the sweep. |
 | `RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS` | 6 | A session still `FINALIZING` after this is marked `FAILED` with `error_code` `finalize_timeout` instead of being re-queued again, and its files are removed. |
+| `VIDEO_TRANSCODE_TIMEOUT_SECONDS` | 18000 (5 h) | Longest one video conversion may run. Keep it below `RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS`; at the default it leaves only about 1 h of the 6 h finalize window for everything else (queueing, verification, the checksum read, the thumbnail). A conversion that times out fails the session with `processing_failed`. |
 | `RESUMABLE_UPLOAD_RETENTION_DAYS` | 7 | Closed sessions are purged after this. |
 
 ## Cleanup
@@ -87,12 +90,12 @@ The repository contains no reverse-proxy or production server configuration, so 
 - Reverse proxy / ingress: request body limit of at least `RESUMABLE_UPLOAD_MAX_CHUNK_BYTES` (nginx `client_max_body_size 16m;` or more). nginx's default of 1 MB rejects every chunk. The proxy does not need a 20 GiB body limit, because no single request carries the whole file.
 - Application server: a request timeout long enough for one chunk at the slowest expected uplink (an 8 MiB chunk at 1 Mbit/s takes about 70 s). Django reads the body in 1 MiB blocks and never buffers a chunk in memory.
 - Disk: free space of at least the largest expected upload plus `RESUMABLE_UPLOAD_MIN_FREE_BYTES`, on the volumes holding `RESUMABLE_UPLOAD_ROOT` and `MEDIA_ROOT`.
-  When the upload root and the video storage are on different volumes (the default in `docker-compose.yml`), finalization moves the file with a full copy, so the video storage volume also needs free space for the whole file (up to 20 GiB) plus `RESUMABLE_UPLOAD_MIN_FREE_BYTES` headroom at finalize time. This is not checked up front; the free-space guard only looks at `RESUMABLE_UPLOAD_ROOT`.
+  Whether or not the upload root and the video storage share a volume (they do not in `docker-compose.yml`), finalization always writes a full new MP4 (the partial file is deleted only afterwards), so the video storage volume needs roughly the file size (up to 20 GiB) plus `RESUMABLE_UPLOAD_MIN_FREE_BYTES` headroom at finalize time. This is not checked up front; the free-space guard only looks at `RESUMABLE_UPLOAD_ROOT`.
 - Celery: a worker must run (it also runs the Google Drive imports) and must mount the same volumes as the web containers. In `docker-compose.yml` both mount `./media` and the `asp-uploads` volume (`/app/arbisoft_sessions_portal/uploads_tmp`).
 
 ## Known limitations
 
-- Finalization re-reads the file once when a whole-file checksum was supplied (and ffmpeg reads it again), so a 20 GiB file takes minutes after the last chunk. The UI shows a "processing" state.
+- Finalization re-reads the file once when a whole-file checksum was supplied (and ffmpeg reads it again), and re-encoding a large file can take hours, up to `VIDEO_TRANSCODE_TIMEOUT_SECONDS`, after the last chunk. The UI shows a "processing" state.
 - The active-session limit and the free-space check are not transactional; simultaneous creations can overshoot slightly.
 - Chunks are sequential per session. Parallel part uploads are not supported.
 - The partial file is written through the application server, not directly to object storage.

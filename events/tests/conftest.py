@@ -1,3 +1,5 @@
+import shutil
+
 import pytest
 from rest_framework.test import APIClient
 
@@ -18,6 +20,19 @@ def disable_event_signals():
     post_save.disconnect(set_slug_on_create, sender=Event)
     yield
     post_save.connect(set_slug_on_create, sender=Event)
+
+
+@pytest.fixture(autouse=True)
+def stub_video_conversion(monkeypatch):
+    """
+    Finalization converts uploads with ffmpeg, but the upload tests send placeholder bytes. They get the file moved
+    into place unchanged; test_transcoding.py exercises the real conversion.
+    """
+    def move_into_place(source, destination):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+
+    monkeypatch.setattr('events.v1.uploads.make_web_playable', move_into_place)
 
 
 @pytest.fixture(scope='session', autouse=True)

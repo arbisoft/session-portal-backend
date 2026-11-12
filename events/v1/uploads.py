@@ -6,8 +6,8 @@ a partial file at exactly ``session.offset`` and the new offset is committed wit
 write, so the committed offset only ever names bytes that were fsynced. A crash between the write and the commit
 leaves surplus bytes behind the committed offset, which the next writer truncates away.
 
-When the last byte is committed the session moves to ``FINALIZING`` and a Celery task verifies the file, promotes it to
-the video storage and creates the ``VideoAsset``. Every step of that task is safe to run again.
+When the last byte is committed the session moves to ``FINALIZING`` and a Celery task verifies the file, converts it
+into the video storage and creates the ``VideoAsset``. Every step of that task is safe to run again.
 """
 import errno
 import hashlib
@@ -33,6 +33,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from events.models import UploadSession, VideoAsset
+from events.v1.transcoding import TranscodeError, make_web_playable, partial_output_path
 
 logger = logging.getLogger("asp_api")
 
@@ -99,8 +100,12 @@ def file_extension(filename: str) -> str:
 
 
 def final_storage_name(session: UploadSession) -> str:
-    """ Deterministic name inside the video storage, so an interrupted finalization can be resumed """
-    return f"{session.id}.{file_extension(session.filename)}"
+    """
+    Deterministic name inside the video storage, so an interrupted finalization can be resumed.
+
+    Every upload is stored as MP4 whatever it arrived as: it is converted to H.264/AAC on the way in.
+    """
+    return f"{session.id}.mp4"
 
 
 def has_valid_signature(header: bytes, extension: str) -> bool:
@@ -424,14 +429,6 @@ def _hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _source_file(session: UploadSession) -> Optional[Path]:
-    """ Where the finished bytes are: the partial file, or the promoted file if a previous attempt already moved it """
-    for candidate in (part_path(session.id), Path(asset_video_storage().path(final_storage_name(session)))):
-        if candidate.exists():
-            return candidate
-    return None
-
-
 def _verification_failure(session: UploadSession, source: Optional[Path]) -> str:
     """ Error code describing why the assembled file is unusable, or an empty string when it is sound """
     if source is None:
@@ -461,12 +458,18 @@ def _fail_session(session: UploadSession, error_code: str) -> None:
     logger.error("upload_session_failed session=%s reason=%s", session.id, error_code)
 
 
-def _remove_promoted_file(session: UploadSession) -> None:
-    """ Drop the file a crashed finalization already moved into the video storage, as no asset references it """
+def _remove_video_file(storage_name: str) -> None:
     try:
-        Path(asset_video_storage().path(final_storage_name(session))).unlink(missing_ok=True)
+        Path(asset_video_storage().path(storage_name)).unlink(missing_ok=True)
     except OSError:
-        logger.exception("upload_promoted_remove_failed session=%s", session.id)
+        logger.exception("upload_video_remove_failed name=%s", storage_name)
+
+
+def _remove_promoted_file(session: UploadSession) -> None:
+    """ Drop the converted file and any half-written conversion a failed finalization left in the video storage """
+    destination = Path(asset_video_storage().path(final_storage_name(session)))
+    for leftover in (destination, partial_output_path(destination)):
+        _remove_video_file(leftover.name)
 
 
 def _remove_thumbnail(thumbnail_name: str) -> None:
@@ -476,37 +479,55 @@ def _remove_thumbnail(thumbnail_name: str) -> None:
         logger.exception("upload_thumbnail_remove_failed name=%s", thumbnail_name)
 
 
-def _discard_failed_asset(session: UploadSession, asset: VideoAsset) -> None:
-    """ Delete the asset row of a file ffmpeg could not process and, once committed, its video and thumbnail """
+def _discard_failed_asset(asset: VideoAsset) -> None:
+    """ Delete an asset row and, once committed, its video and thumbnail files """
+    video_name = asset.video_file.name
     thumbnail_name = asset.thumbnail.name
     asset.delete()
-    transaction.on_commit(partial(_remove_promoted_file, session))
+    if video_name:
+        transaction.on_commit(partial(_remove_video_file, video_name))
     if thumbnail_name:
         transaction.on_commit(partial(_remove_thumbnail, thumbnail_name))
 
 
-def _promote_file(session: UploadSession, source: Path) -> str:
-    """ Move the finished file into the video storage under its deterministic name """
-    name = final_storage_name(session)
-    destination = Path(asset_video_storage().path(name))
-    if source != destination:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(source), str(destination))
-    return name
+def _prepare_video(session: UploadSession) -> str:
+    """
+    Verify the uploaded bytes and leave a browser-playable MP4 under the final name. Returns an error code or "".
+
+    The partial file is removed once the MP4 exists. If a previous attempt got that far and died before the commit,
+    only the MP4 is left, which is trusted as it is: it is only ever renamed into place when complete.
+    """
+    part = part_path(session.id)
+    has_part = part.exists()
+    destination = Path(asset_video_storage().path(final_storage_name(session)))
+    if not has_part and destination.exists():
+        return ""
+
+    source = part if has_part else None
+    failure = _verification_failure(session, source)
+    if failure:
+        return failure
+    try:
+        make_web_playable(part, destination)
+    except TranscodeError:
+        logger.exception("upload_conversion_failed session=%s", session.id)
+        return PROCESSING_FAILED_ERROR
+    part.unlink(missing_ok=True)
+    return ""
 
 
 def _create_asset(session: UploadSession, storage_name: str) -> VideoAsset:
-    """ Create the asset for a promoted file: READY once a duration was found, otherwise FAILED """
+    """ Create the asset for a converted file: READY once a duration was found, otherwise FAILED """
     return VideoAsset.create_with_status(os.path.splitext(session.filename)[0][:255], storage_name)
 
 
 def finalize_session(session_id: UUID) -> Optional[UploadSession]:
     """
-    Verify, promote and register a fully uploaded file. Idempotent and safe under concurrent or repeated calls.
+    Verify, convert and register a fully uploaded file. Idempotent and safe under concurrent or repeated calls.
 
     The row lock is skipped rather than awaited, so a second worker returns immediately while the first one works.
     The asset row is created in the same transaction that completes the session: a crash before the commit rolls the
-    row back, and because the promoted file keeps a deterministic name the retry picks up where the crash happened.
+    row back, and because the converted file keeps a deterministic name the retry picks up where the crash happened.
     Returns None when the session does not exist or is being finalized elsewhere.
     """
     with transaction.atomic():
@@ -514,15 +535,14 @@ def finalize_session(session_id: UUID) -> Optional[UploadSession]:
         if session is None or session.status != UploadSession.UploadStatus.FINALIZING:
             return session
 
-        source = _source_file(session)
-        failure = _verification_failure(session, source)
+        failure = _prepare_video(session)
         if failure:
             _fail_session(session, failure)
             return session
 
-        asset = _create_asset(session, _promote_file(session, source))
+        asset = _create_asset(session, final_storage_name(session))
         if asset.status != VideoAsset.VideoStatus.READY:
-            _discard_failed_asset(session, asset)
+            _discard_failed_asset(asset)
             _fail_session(session, PROCESSING_FAILED_ERROR)
             return session
 
