@@ -244,7 +244,7 @@ def codecs(path):
 
 @needs_ffmpeg
 class TestRealConversion:
-    """ The formats from the playback report, converted by the real ffmpeg """
+    """ AVI, WebM, MOV and MP4 files in codecs browsers cannot decode, converted by the real ffmpeg """
 
     FORMATS = {
         'avi_mpeg4': ('clip.avi', ['-c:v', 'mpeg4', '-c:a', 'libmp3lame']),
@@ -399,7 +399,7 @@ class TestConvertVideoAssetsCommand:
         assert not (media_storage / 'video_file' / 'old.avi').exists()
         assert asset.file_size == (media_storage / 'video_file' / 'old.mp4').stat().st_size
 
-    def test_conversion_repairs_an_asset_that_failed_to_probe(self, media_storage):
+    def test_conversion_repairs_an_unprobed_asset(self, media_storage):
         """ An asset whose original could not be probed gets its duration and becomes READY, so it can be published """
         asset = self.stored_asset(media_storage, 'old.avi', '-c:v', 'mpeg4', '-c:a', 'libmp3lame')
         VideoAsset.objects.filter(pk=asset.pk).update(status=VideoAsset.VideoStatus.FAILED, duration=0)

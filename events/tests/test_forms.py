@@ -159,7 +159,7 @@ class TestVideoAssetFormCaptions:
 
         assert form.is_valid(), form.errors
 
-    def test_stored_captions_of_another_type_do_not_block_edits(self):
+    def test_stored_captions_of_other_type_allow_edits(self):
         """ A row stored before the .vtt/.srt rule existed can still be saved from the admin without new captions """
         asset = VideoAssetFactory(event=None, captions_file='old.txt')
         video_file = SimpleUploadedFile('talk.mp4', b'fake video content', content_type='video/mp4')
