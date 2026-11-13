@@ -587,3 +587,34 @@ class TestConvertAssetChangedMidway:
             assert VideoAsset.objects.get(pk=asset.pk).video_file.name == 'other.mp4'
         else:
             assert not VideoAsset.objects.filter(pk=asset.pk).exists()
+
+    def test_discard_failure_does_not_abort_the_run(self, media_storage, caplog):
+        """ A discarded file that cannot be removed is logged, the asset still counts as failed and the run ends """
+        folder = media_storage / 'video_file'
+        folder.mkdir(parents=True, exist_ok=True)
+        source = folder / 'old.avi'
+        source.write_bytes(b'original')
+        asset = VideoAsset.objects.create(title='Old', status=VideoAsset.VideoStatus.READY)
+        VideoAsset.objects.filter(pk=asset.pk).update(video_file='old.avi')
+        converted = folder / 'old.mp4'
+        real_unlink = Path.unlink
+
+        def convert_and_change(_source, destination):
+            destination.write_bytes(b'converted')
+            self.change_row(asset.pk, 'repointed')
+
+        def unlink_denied(path, *args, **kwargs):
+            if path.name == converted.name:
+                raise PermissionError(errno.EACCES, 'denied', str(path))
+            return real_unlink(path, *args, **kwargs)
+
+        output = StringIO()
+        with patch('events.management.commands.convert_videoassets.make_web_playable', convert_and_change), \
+                patch.object(Path, 'unlink', unlink_denied), caplog.at_level('ERROR', logger='asp_api'):
+            call_command('convert_videoassets', stdout=output)
+
+        assert '0 converted, 0 already playable, 1 failed' in output.getvalue()
+        assert 'changed during conversion' in output.getvalue()
+        assert f'convert_videoassets_discard_failed asset={asset.pk} file={converted.name}' in caplog.text
+        assert source.read_bytes() == b'original'
+        assert VideoAsset.objects.get(pk=asset.pk).video_file.name == 'other.mp4'

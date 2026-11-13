@@ -86,7 +86,10 @@ class Command(BaseCommand):
             )
         updated = VideoAsset.objects.filter(pk=asset.pk, video_file=original_name).update(**changes)
         if not updated:
-            destination.unlink(missing_ok=True)
+            try:
+                destination.unlink(missing_ok=True)
+            except OSError:
+                logger.exception('convert_videoassets_discard_failed asset=%s file=%s', asset.pk, destination.name)
             logger.error('convert_videoassets_asset_changed asset=%s file=%s', asset.pk, source.name)
             self.stdout.write(self.style.ERROR(f'#{asset.pk} {asset.title}: changed during conversion, left as it was'))
             return False
