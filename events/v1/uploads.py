@@ -7,18 +7,21 @@ write, so the committed offset only ever names bytes that were fsynced. A crash 
 leaves surplus bytes behind the committed offset, which the next writer truncates away.
 
 When the last byte is committed the session moves to ``FINALIZING`` and a Celery task verifies the file, converts it
-into the video storage and creates the ``VideoAsset``. Every step of that task is safe to run again.
+into the video storage and creates the ``VideoAsset``. Every step of that task is safe to run again. The conversion
+can take hours, so it runs without a transaction; only registering its outcome is transactional.
 """
 import errno
+import fcntl
 import hashlib
 import logging
 import os
 import shutil
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
-from typing import BinaryIO, Optional
+from typing import BinaryIO, Iterator, Optional
 from uuid import UUID
 
 from celery import current_app
@@ -516,6 +519,31 @@ def _discard_failed_asset(asset: VideoAsset) -> None:
         transaction.on_commit(partial(_remove_thumbnail, thumbnail_name))
 
 
+@contextmanager
+def _finalization_claim(session_id: UUID) -> Iterator[bool]:
+    """
+    Claim the right to convert a session's file while the block runs; yields False when another worker holds it.
+
+    A conversion lasts hours, far too long for a transaction or a row lock: an idle-in-transaction timeout or a
+    connection pooler would kill it, and the owner's cancel and the stale-finalization sweep would be blocked or blind
+    meanwhile. An exclusive ``flock`` on the partial file keeps two workers (a redelivered task, the sweep's
+    re-queue) from writing the same output instead. The kernel drops it when the process dies, so a crashed worker
+    never blocks the retry. Without a partial file there is nothing to convert and the claim is granted.
+    """
+    with ExitStack() as stack:
+        claimed = True
+        try:
+            handle = stack.enter_context(open(part_path(session_id), "r+b"))
+        except FileNotFoundError:
+            pass
+        else:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                claimed = False
+        yield claimed
+
+
 def _prepare_video(session: UploadSession) -> str:
     """
     Verify the uploaded bytes and leave a browser-playable MP4 under the final name. Returns an error code or "".
@@ -547,37 +575,63 @@ def _create_asset(session: UploadSession, storage_name: str) -> VideoAsset:
     return VideoAsset.create_with_status(os.path.splitext(session.filename)[0][:255], storage_name)
 
 
+def _register_asset(session: UploadSession) -> str:
+    """ Create the asset for the converted file and complete the session. Returns an error code or "" """
+    asset = _create_asset(session, final_storage_name(session))
+    if asset.status != VideoAsset.VideoStatus.READY:
+        _discard_failed_asset(asset)
+        return PROCESSING_FAILED_ERROR
+    session.video_asset = asset
+    session.status = UploadSession.UploadStatus.COMPLETED
+    session.save(update_fields=["video_asset", "status", "modified"])
+    return ""
+
+
+def _settle_finalization(session_id: UUID, failure: str) -> Optional[UploadSession]:
+    """
+    Record the outcome of a conversion in one short transaction, after checking the session still waits for it.
+
+    The session may have been settled while the conversion ran: another worker completed it, or the stuck-session
+    sweep failed it. A completed one owns the converted file; for any other state the file is an orphan and goes.
+    """
+    with transaction.atomic():
+        session = UploadSession.objects.select_for_update().filter(pk=session_id).first()
+        if session is None:
+            return None
+        if session.status != UploadSession.UploadStatus.FINALIZING:
+            if session.status != UploadSession.UploadStatus.COMPLETED:
+                transaction.on_commit(partial(_remove_promoted_file, session))
+            return session
+
+        failure = failure or _register_asset(session)
+        if failure:
+            _fail_session(session, failure)
+    return session
+
+
 def finalize_session(session_id: UUID) -> Optional[UploadSession]:
     """
     Verify, convert and register a fully uploaded file. Idempotent and safe under concurrent or repeated calls.
 
-    The row lock is skipped rather than awaited, so a second worker returns immediately while the first one works.
-    The asset row is created in the same transaction that completes the session: a crash before the commit rolls the
-    row back, and because the converted file keeps a deterministic name the retry picks up where the crash happened.
-    Returns None when the session does not exist or is being finalized elsewhere.
+    Three steps, with no transaction open while the file is verified and converted (see ``_finalization_claim``):
+    read the session, convert under the file claim, then settle the outcome in one short transaction. The asset row is
+    created in that transaction together with the session update, so a crash before the commit rolls the row back, and
+    because the converted file keeps a deterministic name the retry picks up where the crash happened.
+    Returns None when the session does not exist or another worker is converting its file.
     """
-    with transaction.atomic():
-        session = UploadSession.objects.select_for_update(skip_locked=True).filter(pk=session_id).first()
-        if session is None or session.status != UploadSession.UploadStatus.FINALIZING:
-            return session
+    session = UploadSession.objects.filter(pk=session_id).first()
+    if session is None or session.status != UploadSession.UploadStatus.FINALIZING:
+        return session
 
+    with _finalization_claim(session.id) as claimed:
+        if not claimed:
+            return None
         failure = _prepare_video(session)
-        if failure:
-            _fail_session(session, failure)
-            return session
+        settled = _settle_finalization(session.id, failure)
 
-        asset = _create_asset(session, final_storage_name(session))
-        if asset.status != VideoAsset.VideoStatus.READY:
-            _discard_failed_asset(asset)
-            _fail_session(session, PROCESSING_FAILED_ERROR)
-            return session
-
-        session.video_asset = asset
-        session.status = UploadSession.UploadStatus.COMPLETED
-        session.save(update_fields=["video_asset", "status", "modified"])
-
-    logger.info("upload_session_finalized session=%s result=%s", session.id, session.status)
-    return session
+    if settled is not None:
+        logger.info("upload_session_finalized session=%s result=%s", settled.id, settled.status)
+    return settled
 
 
 def _expire_sessions(now) -> int:
