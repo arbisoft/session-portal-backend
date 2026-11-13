@@ -375,52 +375,34 @@ class TestEventVideosOrdering:
 
 
 @pytest.mark.django_db
-class TestEventFirstVideo:
-    """ Test cases for Event.first_video and Event.playable_video """
+class TestEventPlayableVideo:
+    """ Test cases for Event.playable_video """
 
     @staticmethod
     def loaded(event):
         """ The event as the list and detail endpoints load it, with its videos prefetched """
         return Event.objects.with_card_data().get(pk=event.pk)
 
-    def test_first_video_is_lowest_pk(self):
-        """ Without the playable filter the lowest pk wins, with or without a file """
-        event = EventFactory(slug='talk')
-        unplayable = VideoAssetFactory(event=event)
-        playable = VideoAssetFactory(event=event)
-        make_playable(playable)
-
-        assert self.loaded(event).first_video() == unplayable
-
-    def test_only_playable_skips_files_less_video(self):
-        """ With only_playable the lowest pk among videos that have a file wins """
+    def test_lowest_pk_with_a_file_wins(self):
+        """ Videos without a file are skipped and the lowest pk among the others is returned """
         event = EventFactory(slug='talk')
         VideoAssetFactory(event=event)
-        playable = VideoAssetFactory(event=event)
-        make_playable(playable)
+        first_playable = VideoAssetFactory(event=event)
+        second_playable = VideoAssetFactory(event=event)
+        make_playable(first_playable, second_playable)
 
-        assert self.loaded(event).first_video(only_playable=True) == playable
+        assert self.loaded(event).playable_video() == first_playable
 
-    def test_playable_video_matches_only_playable(self):
-        """ playable_video is first_video(only_playable=True) """
+    def test_no_file_returns_none(self):
+        """ An event whose videos have no file has nothing playable """
         event = EventFactory(slug='talk')
         VideoAssetFactory(event=event)
-        make_playable(VideoAssetFactory(event=event), VideoAssetFactory(event=event))
-        loaded = self.loaded(event)
 
-        assert loaded.playable_video() == loaded.first_video(only_playable=True)
-        assert loaded.playable_video() is not None
+        assert self.loaded(event).playable_video() is None
 
     def test_no_videos_returns_none(self):
-        """ An event without a (playable) video has nothing to return """
-        event = EventFactory(slug='talk')
-        VideoAssetFactory(event=event)
-        loaded = self.loaded(event)
-
-        assert loaded.first_video() is not None
-        assert loaded.first_video(only_playable=True) is None
-        assert loaded.playable_video() is None
-        assert self.loaded(EventFactory(slug='empty')).first_video() is None
+        """ An event without any video has nothing to return """
+        assert self.loaded(EventFactory(slug='empty')).playable_video() is None
 
     def test_python_and_sql_rules_agree(self):
         """ event_videos (SQL) and playable_video (Python) pick the same asset """

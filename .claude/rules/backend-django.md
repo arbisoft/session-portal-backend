@@ -29,7 +29,7 @@ paths:
 
 - `select_related()` for ForeignKey / OneToOne, `prefetch_related()` for M2M / reverse FK. Check serializers and properties, not just the view.
 - No N+1 — `SerializerMethodField`s and model properties must use prefetched data (`.all()`, not `.filter()`). See the `django-query-optimisation` skill.
-- Event list/detail endpoints traverse `creator`, `tags`, `playlists`, `presenters`, and the reverse `videos` relation; any new field on them needs matching `select_related`/`prefetch_related`. `Event.objects.with_card_data()` (`EventQuerySet` in `events/models.py`) owns that prefetch set: build every queryset that feeds `EventSerializer` from it and extend it when a serializer field is added. `.first()` and `.filter()` on a related manager bypass the prefetch cache; read the prefetched `.all()` instead (precedent: `Event.first_video`, `Event.playable_video`).
+- Event list/detail endpoints traverse `creator`, `tags`, `playlists`, `presenters`, and the reverse `videos` relation; any new field on them needs matching `select_related`/`prefetch_related`. `Event.objects.with_card_data()` (`EventQuerySet` in `events/models.py`) owns that prefetch set: build every queryset that feeds `EventSerializer` from it and extend it when a serializer field is added. `.first()` and `.filter()` on a related manager bypass the prefetch cache; read the prefetched `.all()` instead (precedent: `Event.playable_video`).
 - `bulk_create()` / `bulk_update()` for batches — never loop-save.
 - `.only()` / `.defer()` or `values()` on hot paths when full rows are not needed (see `VideoAssetIncrementViewCountView`).
 - `QuerySet.update()` when touching columns on a `VideoAsset` without needing ffmpeg: `VideoAsset.save()` runs ffmpeg whenever `video_file` is set.

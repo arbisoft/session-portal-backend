@@ -131,19 +131,14 @@ class Event(models.Model):
     def __str__(self):
         return self.title
 
-    def first_video(self, only_playable: bool = False) -> 'VideoAsset | None':
-        """
-        Lowest-pk video of the event, read from prefetched ``videos`` when available.
-
-        With ``only_playable`` videos without a file are skipped. Only that playable variant has an SQL
-        counterpart (``events.v1.utils.event_videos``), which must be kept in step with it.
-        """
-        videos = (video for video in self.videos.all() if video.video_file or not only_playable)
-        return min(videos, key=attrgetter('pk'), default=None)
-
     def playable_video(self) -> 'VideoAsset | None':
-        """ Lowest-pk video of the event that has a file, i.e. ``first_video(only_playable=True)`` """
-        return self.first_video(only_playable=True)
+        """
+        Lowest-pk video of the event that has a file, read from prefetched ``videos`` when available.
+
+        Its SQL counterpart is ``events.v1.utils.event_videos``, which must be kept in step with it.
+        """
+        videos = (video for video in self.videos.all() if video.video_file)
+        return min(videos, key=attrgetter('pk'), default=None)
 
 
 class VideoAsset(models.Model):

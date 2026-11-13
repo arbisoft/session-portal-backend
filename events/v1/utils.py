@@ -15,10 +15,9 @@ def event_videos(event_slug: str) -> QuerySet[VideoAsset]:
 
     The stream, the video detail and the view count all resolve the asset through this queryset, so they cannot
     disagree. A video with a file beats one without; ties go to the lowest event pk, then the lowest video pk. For a
-    single event this is ``Event.playable_video`` (``first_video(only_playable=True)``); ``first_video()`` without an
-    argument ignores whether a video has a file. Slugs are not unique, so the order also decides between events that
-    share one: the lowest-pk event that has a playable video owns the slug. Callers take ``.first()`` (or a ``[:1]``
-    subquery) instead of ``get_object_or_404`` so duplicates never raise ``MultipleObjectsReturned``.
+    single event this is ``Event.playable_video``. Slugs are not unique, so the order also decides between events
+    that share one: the lowest-pk event that has a playable video owns the slug. Callers take ``.first()`` (or a
+    ``[:1]`` subquery) instead of ``get_object_or_404`` so duplicates never raise ``MultipleObjectsReturned``.
     """
     without_file = Case(
         When(Q(video_file__isnull=True) | Q(video_file=''), then=Value(1)),
