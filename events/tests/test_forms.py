@@ -159,6 +159,28 @@ class TestVideoAssetFormCaptions:
 
         assert form.is_valid(), form.errors
 
+    def test_stored_captions_of_another_type_do_not_block_edits(self):
+        """ A row stored before the .vtt/.srt rule existed can still be saved from the admin without new captions """
+        asset = VideoAssetFactory(event=None, captions_file='old.txt')
+        video_file = SimpleUploadedFile('talk.mp4', b'fake video content', content_type='video/mp4')
+
+        form = VideoAssetForm(data={'title': 'Renamed'}, files={'video_file': video_file}, instance=asset)
+
+        assert form.is_valid(), form.errors
+
+    def test_replacing_stored_captions_applies_the_rule(self):
+        """ Uploading a new file over a stored one is judged like any new upload """
+        asset = VideoAssetFactory(event=None, captions_file='old.vtt')
+        video_file = SimpleUploadedFile('talk.mp4', b'fake video content', content_type='video/mp4')
+        captions = SimpleUploadedFile('new.txt', b'WEBVTT')
+
+        form = VideoAssetForm(
+            data={'title': 'Renamed'}, files={'video_file': video_file, 'captions_file': captions}, instance=asset
+        )
+
+        assert not form.is_valid()
+        assert 'is not allowed' in form.errors['captions_file'][0]
+
 
 class TestCaptionsFileValidator:
     """Class to test the extension validator of VideoAsset.captions_file"""
@@ -176,6 +198,24 @@ class TestCaptionsFileValidator:
 
         with pytest.raises(ValidationError) as error:
             field.run_validators(ContentFile(b'', name=name))
+
+        assert error.value.error_list[0].code == 'invalid_extension'
+
+    def test_stored_file_is_not_judged(self):
+        """ A FieldFile already in storage passes whatever its extension: the rule is for uploads only """
+        asset = VideoAsset(captions_file='old.txt')
+        field = VideoAsset._meta.get_field('captions_file')  # pylint: disable=protected-access
+
+        field.run_validators(asset.captions_file)
+
+    def test_newly_assigned_file_is_judged(self):
+        """ The same field rejects a file that is being assigned """
+        asset = VideoAsset()
+        asset.captions_file = SimpleUploadedFile('new.txt', b'WEBVTT')
+        field = VideoAsset._meta.get_field('captions_file')  # pylint: disable=protected-access
+
+        with pytest.raises(ValidationError) as error:
+            field.run_validators(asset.captions_file)
 
         assert error.value.error_list[0].code == 'invalid_extension'
 

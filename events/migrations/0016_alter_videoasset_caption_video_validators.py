@@ -1,6 +1,7 @@
 import django.core.files.storage
 import django.core.validators
 from django.db import migrations, models
+import events.models
 import pathlib
 
 
@@ -22,7 +23,7 @@ class Migration(migrations.Migration):
                     location=pathlib.PurePosixPath('/app/arbisoft_sessions_portal/media/captions'),
                 ),
                 upload_to='',
-                validators=[django.core.validators.FileExtensionValidator(['vtt', 'srt'])],
+                validators=[events.models.validate_new_caption_file],
             ),
         ),
         migrations.AlterField(

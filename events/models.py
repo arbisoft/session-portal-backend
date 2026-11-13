@@ -18,6 +18,21 @@ logger = logging.getLogger("asp_api")
 
 ALLOWED_VIDEO_EXTENSIONS = ("mp4", "mov", "avi", "webm")
 ALLOWED_CAPTION_EXTENSIONS = ("vtt", "srt")
+validate_caption_extension = FileExtensionValidator(list(ALLOWED_CAPTION_EXTENSIONS))
+
+
+def validate_new_caption_file(value) -> None:
+    """
+    Apply ``validate_caption_extension`` to a file being uploaded and leave one that is already stored alone.
+
+    Field validators run again on every admin save, so a rule added after files were stored would otherwise block
+    unrelated edits of rows that predate it.
+    """
+    if getattr(value, '_committed', False):
+        return
+    validate_caption_extension(value)
+
+
 validate_video_extension = FileExtensionValidator(
     sorted(ALLOWED_VIDEO_EXTENSIONS),
     message="Unsupported file type '.%(extension)s'. Allowed formats: %(allowed_extensions)s.",
@@ -154,7 +169,7 @@ class VideoAsset(models.Model):
         storage=captions_storage,
         null=True,
         blank=True,
-        validators=[FileExtensionValidator(list(ALLOWED_CAPTION_EXTENSIONS))],
+        validators=[validate_new_caption_file],
     )
     file_size = models.BigIntegerField(default=0)  # in bytes
     view_count = models.PositiveIntegerField(default=0)
