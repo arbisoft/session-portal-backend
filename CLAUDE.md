@@ -39,7 +39,7 @@ API docs are served at `/api/docs/` (Swagger) and `/api/redoc/`.
 
 ## Architecture
 
-Two Django apps, both exposing a versioned API under `/api/v1/<app>/` with a `v1/` subpackage holding that app's `serializers.py`, `views.py`, `urls.py` (plus `filters.py`, `pagination.py`, `utils.py`, `uploads.py`, `streaming.py` in `events`). New API versions should be a sibling package, not edits to `v1`.
+Two Django apps, both exposing a versioned API under `/api/v1/<app>/` with a `v1/` subpackage holding that app's `serializers.py`, `views.py`, `urls.py` (plus `filters.py`, `pagination.py`, `utils.py`, `uploads.py`, `streaming.py`, `transcoding.py` in `events`). New API versions should be a sibling package, not edits to `v1`.
 
 - **`users`** — has no models; uses `django.contrib.auth.User`. Provides login (Google OAuth access token → JWT via `GoogleUserInfoService`, or email/password → JWT) and staff-only user search. `users/permissions.py::IsStaffPermission` is the shared gate for staff-only endpoints, including ones in `events`. Google login rejects accounts whose `hd` isn't `arbisoft.com`/`edly.io` while `ALLOW_ONLY_INTERNAL_USERS` is true.
 - **`events`** — `Event` (has slug, status, tags, playlists, presenters via `EventPresenter`) and `VideoAsset` (file, thumbnail, captions, duration, view_count). Tags/playlists are ordered by their most recent event time.

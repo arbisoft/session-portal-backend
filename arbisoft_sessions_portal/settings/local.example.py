@@ -29,6 +29,9 @@ DATABASES = {
 # RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS = 6
 # RESUMABLE_UPLOAD_RETENTION_DAYS = 7
 
+# Longest one video conversion may run, in seconds. Keep it below RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS.
+# VIDEO_TRANSCODE_TIMEOUT_SECONDS = 5 * 3600
+
 # Largest caption file (.vtt or .srt) accepted through the admin.
 # CAPTIONS_MAX_FILE_BYTES = 2 * 1024 ** 2
 

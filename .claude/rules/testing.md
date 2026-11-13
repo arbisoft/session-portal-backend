@@ -27,7 +27,7 @@ pytest events/tests/test_apis.py::TestClassName::test_name  # single test
 
 ## Organization
 
-- Tests live in `<app>/tests/`: `test_apis.py`, `test_staff_apis.py`, `test_filters.py`, `test_forms.py`, `test_tasks.py`, `test_video_stream.py` (authenticated streaming, incl. query-count tests), `test_uploads.py`, `test_upload_endpoints.py` and `test_upload_cleanup.py` (resumable uploads; split because pylint caps a module at 1000 lines). Extend the matching file before creating a new one.
+- Tests live in `<app>/tests/`: `test_apis.py`, `test_staff_apis.py`, `test_filters.py`, `test_forms.py`, `test_tasks.py`, `test_video_stream.py` (authenticated streaming, incl. query-count tests), `test_uploads.py`, `test_upload_endpoints.py` and `test_upload_cleanup.py` (resumable uploads; split because pylint caps a module at 1000 lines), `test_transcoding.py` (real ffmpeg conversion). Extend the matching file before creating a new one.
 - Test method names are snake_case and at most 50 characters. This is a house convention: pylint's default naming (3.3.3) has no upper bound and `pylintrc` sets no `method-rgx`, so CI does not catch a longer name.
 - Descriptive names that explain the scenario.
 
@@ -39,6 +39,7 @@ pytest events/tests/test_apis.py::TestClassName::test_name  # single test
 - The `Event` slug signal is disconnected for every test (autouse), so factories must set `slug` explicitly.
 - Do not call real Google APIs or Celery brokers. Mock the HTTP layer (`responses` is installed) and use the `memory://` broker from test settings.
 - ffmpeg-dependent paths: patch the probe/thumbnail step unless the test is specifically about it.
+- The autouse `stub_video_conversion` fixture (`events/tests/conftest.py`) replaces `events.v1.uploads.make_web_playable` with a file copy, so upload tests can send placeholder bytes. Exercise the real conversion by calling `events.v1.transcoding.make_web_playable` directly, as `test_transcoding.py` does.
 
 ## Migrations
 

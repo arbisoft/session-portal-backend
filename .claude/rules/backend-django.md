@@ -9,7 +9,7 @@ paths:
 
 ## Layout
 
-- Each app exposes a versioned API under `<app>/v1/` (`serializers.py`, `views.py`, `urls.py`; `events` also has `filters.py`, `pagination.py`, `utils.py`, `uploads.py`, `streaming.py`).
+- Each app exposes a versioned API under `<app>/v1/` (`serializers.py`, `views.py`, `urls.py`; `events` also has `filters.py`, `pagination.py`, `utils.py`, `uploads.py`, `streaming.py`, `transcoding.py`).
 - A new API version is a sibling package (`v2/`), never an edit that changes the contract of `v1`.
 - Shared permission classes live in `users/permissions.py` (`IsStaffPermission`), including for `events` endpoints.
 
