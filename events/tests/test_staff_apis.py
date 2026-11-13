@@ -590,3 +590,29 @@ class TestOpenAPISchema:
         """ Test that the create endpoint documents the Event payload it actually returns """
         response_schema = schema['paths']['/api/v1/events/']['post']['responses']['201']['content']['application/json']
         assert response_schema['schema']['$ref'] == '#/components/schemas/Event'
+
+    def test_stream_documents_its_error_responses(self, schema):
+        """ The stream documents 404 and 416 as responses without a body, next to the binary 200 and 206 """
+        responses = schema['paths']['/api/v1/events/videoasset/{event_slug}/stream/']['get']['responses']
+
+        assert sorted(responses) == ['200', '206', '404', '416']
+        assert 'content' not in responses['404']
+        assert 'content' not in responses['416']
+        assert 'video/*' in responses['206']['content']
+
+    def test_recommendations_document_paginated_events(self, schema):
+        """ The recommendations endpoint documents the same paginated list as the events list """
+        operation = schema['paths']['/api/v1/events/recommendations/{event_slug}/']['get']
+        content = operation['responses']['200']['content']['application/json']['schema']
+
+        assert content['$ref'] == '#/components/schemas/PaginatedEventList'
+        assert {'page', 'page_size'} <= {parameter['name'] for parameter in operation['parameters']}
+
+    def test_event_card_fields_have_their_real_types(self, schema):
+        """ The duration is a nullable integer, not the string default of an untyped method field """
+        properties = schema['components']['schemas']['Event']['properties']
+
+        assert properties['video_duration']['type'] == 'integer'
+        assert properties['video_duration']['nullable'] is True
+        assert properties['video_file']['type'] == 'string'
+        assert properties['thumbnail']['type'] == 'string'

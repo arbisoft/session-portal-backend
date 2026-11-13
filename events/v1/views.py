@@ -1,6 +1,7 @@
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import (
     OpenApiParameter,
+    OpenApiResponse,
     PolymorphicProxySerializer,
     extend_schema,
     extend_schema_view,
@@ -88,7 +89,8 @@ class VideoAssetDetailView(RetrieveAPIView):
     responses={
         (200, 'video/*'): OpenApiTypes.BINARY,
         (206, 'video/*'): OpenApiTypes.BINARY,
-        416: OpenApiTypes.NONE,
+        404: OpenApiResponse(description='The event has no playable video.'),
+        416: OpenApiResponse(description='The requested range is outside the file; Content-Range: bytes */<size>.'),
     },
     description='Streams the event video to an authenticated caller. Supports HTTP Range requests for seeking.',
 )
@@ -161,6 +163,7 @@ class PlaylistListView(ListAPIView):
     filterset_class = PlaylistFilter
 
 
+@extend_schema(responses=EventSerializer(many=True))
 class EventRecommendationsView(APIView):
     """ View for listing similar events """
     pagination_class = CustomPageNumberPagination

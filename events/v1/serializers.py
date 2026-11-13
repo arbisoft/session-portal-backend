@@ -89,18 +89,18 @@ class EventSerializer(serializers.ModelSerializer):
         return [tag.name for tag in event.tags.all()]
 
     @staticmethod
-    def get_thumbnail(event):
+    def get_thumbnail(event) -> str:
         """ Thumbnail of the video the stream plays, if available """
         video = event.playable_video()
         return video.thumbnail.url if video and video.thumbnail else ''
 
     @staticmethod
-    def get_video_file(event):
+    def get_video_file(event) -> str:
         """ Authenticated stream endpoint of the event's video if available (never the raw media URL) """
         return video_stream_path(event.slug) if event.playable_video() else ''
 
     @staticmethod
-    def get_video_duration(event):
+    def get_video_duration(event) -> int | None:
         """ Duration of the video the stream plays, if available """
         video = event.playable_video()
         return video.duration if video and video.duration else None
@@ -131,7 +131,7 @@ class VideoAssetSerializer(serializers.ModelSerializer):
         )
 
     @staticmethod
-    def get_video_file(video_asset):
+    def get_video_file(video_asset) -> str:
         """
         Stream endpoint of the event's playable video, same as ``EventSerializer``; ``''`` without an event.
 
