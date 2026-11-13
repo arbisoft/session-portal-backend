@@ -62,9 +62,17 @@ def needs_conversion(path: Path) -> bool:
         return True
     try:
         plan = plan_conversion(ffmpeg.probe(str(path)))
-    except (ffmpeg.Error, TranscodeError):
+    except (ffmpeg.Error, TranscodeError, OSError):
         return True
     return not (plan.copy_video and (plan.audio_index is None or plan.copy_audio))
+
+
+def probe_duration(path: Path) -> int:
+    """ Whole seconds of playing time ffmpeg finds in the file, or 0 when it cannot tell """
+    try:
+        return int(float(ffmpeg.probe(str(path))["format"]["duration"]))
+    except (ffmpeg.Error, OSError, KeyError, ValueError):
+        return 0
 
 
 def build_command(source: Path, output: Path, plan: ConversionPlan) -> list[str]:
@@ -95,20 +103,32 @@ def partial_output_path(destination: Path) -> Path:
     return destination.with_name(f"{destination.stem}.partial.mp4")
 
 
+def _discard_output(output: Path) -> None:
+    """ Remove the half-written output; a failure here must not hide the error that led to it """
+    try:
+        output.unlink(missing_ok=True)
+    except OSError:
+        logger.exception("video_conversion_cleanup_failed output=%s", output.name)
+
+
 def make_web_playable(source: Path, destination: Path) -> None:
     """
     Write a browser-playable MP4 of ``source`` to ``destination``. ``source`` is left untouched.
 
     The output is built next to the destination and renamed into place, so a crash or a timeout never leaves a
     half-written file under the final name. Raises ``TranscodeError`` when the file is unreadable or cannot be
-    converted.
+    converted, including when the operating system fails the work (ffmpeg missing, disk full, read-only storage):
+    repeating a conversion that takes hours cannot fix those, so they must not escape as a retryable ``OSError``.
     """
     try:
         plan = plan_conversion(ffmpeg.probe(str(source)))
+        destination.parent.mkdir(parents=True, exist_ok=True)
     except ffmpeg.Error as exc:
         raise TranscodeError("ffmpeg could not read the file") from exc
+    except OSError as exc:
+        logger.exception("video_conversion_unavailable source=%s", source.name)
+        raise TranscodeError("The conversion could not be started") from exc
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
     output = partial_output_path(destination)
     try:
         subprocess.run(
@@ -124,8 +144,11 @@ def make_web_playable(source: Path, destination: Path) -> None:
     except subprocess.TimeoutExpired as exc:
         logger.error("video_conversion_timeout source=%s", source.name)
         raise TranscodeError("The conversion took too long") from exc
+    except OSError as exc:
+        logger.exception("video_conversion_io_failed source=%s", source.name)
+        raise TranscodeError("The converted file could not be written") from exc
     finally:
-        output.unlink(missing_ok=True)
+        _discard_output(output)
     logger.info(
         "video_converted source=%s copied_video=%s copied_audio=%s", source.name, plan.copy_video, plan.copy_audio
     )

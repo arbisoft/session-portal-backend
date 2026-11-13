@@ -3,9 +3,10 @@ import os
 from pathlib import Path
 
 from django.core.management.base import BaseCommand
+from django.db.models import Case, F, Value, When
 
 from events.models import VideoAsset
-from events.v1.transcoding import TranscodeError, make_web_playable, needs_conversion
+from events.v1.transcoding import TranscodeError, make_web_playable, needs_conversion, probe_duration
 
 logger = logging.getLogger("asp_api")
 
@@ -58,9 +59,11 @@ class Command(BaseCommand):
         another asset's ``talk.mp4`` safe from a ``talk.avi`` conversion, and an HEVC ``talk.mp4`` is converted to a new
         file instead of being replaced in place, so a failed conversion never touches the original.
 
-        Uses ``update()`` because ``VideoAsset.save()`` would probe the video and regenerate its thumbnail again. The
-        update only matches while the asset still points at the original file; if it was deleted or repointed during
-        the conversion, the new file is discarded and the original is kept.
+        Uses ``update()`` because ``VideoAsset.save()`` would write back every column as it was before a conversion
+        that can take hours, losing the views counted meanwhile. The converted file is probed here instead: an asset
+        whose original could not be probed (``duration`` 0, ``FAILED``) gets its duration and becomes ``READY``, so it
+        can be attached to an event. The update only matches while the asset still points at the original file; if it
+        was deleted or repointed during the conversion, the new file is discarded and the original is kept.
         """
         storage = asset.video_file.storage
         original_name = asset.video_file.name
@@ -73,9 +76,15 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f'#{asset.pk} {asset.title}: conversion failed, left as it was'))
             return False
 
-        updated = VideoAsset.objects.filter(pk=asset.pk, video_file=original_name).update(
-            video_file=storage_name, file_size=destination.stat().st_size
-        )
+        changes = {'video_file': storage_name, 'file_size': destination.stat().st_size}
+        duration = probe_duration(destination)
+        if duration:
+            changes['duration'] = duration
+            changes['status'] = Case(
+                When(status=VideoAsset.VideoStatus.FAILED, then=Value(VideoAsset.VideoStatus.READY)),
+                default=F('status'),
+            )
+        updated = VideoAsset.objects.filter(pk=asset.pk, video_file=original_name).update(**changes)
         if not updated:
             destination.unlink(missing_ok=True)
             logger.error('convert_videoassets_asset_changed asset=%s file=%s', asset.pk, source.name)

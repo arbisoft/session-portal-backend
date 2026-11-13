@@ -1,3 +1,4 @@
+import errno
 import shutil
 import subprocess
 from io import StringIO
@@ -10,15 +11,17 @@ import pytest
 from django.core.management import call_command
 
 from events.models import UploadSession, VideoAsset
-from events.tests.test_uploads import upload_in_chunks
+from events.tests.test_uploads import make_video, upload_in_chunks
 from events.v1 import transcoding, uploads
 from events.v1.transcoding import (
     ConversionPlan,
     TranscodeError,
     build_command,
     make_web_playable,
+    needs_conversion,
     partial_output_path,
     plan_conversion,
+    probe_duration,
 )
 from events.v1.uploads import finalize_session, part_path
 
@@ -131,6 +134,79 @@ class TestMakeWebPlayable:
             with patch.object(subprocess, 'run', side_effect=subprocess.TimeoutExpired('ffmpeg', 1)):
                 with pytest.raises(TranscodeError):
                     make_web_playable(source, tmp_path / 'out.mp4')
+
+    def test_missing_ffmpeg_is_an_error(self, tmp_path):
+        """ A missing binary is reported as a failed conversion, not as an OSError the task would retry """
+        source = tmp_path / 'in.avi'
+        source.write_bytes(b'x')
+
+        with patch.object(transcoding.ffmpeg, 'probe', side_effect=FileNotFoundError('ffprobe')):
+            with pytest.raises(TranscodeError):
+                make_web_playable(source, tmp_path / 'out.mp4')
+
+    @pytest.mark.parametrize('failing, error', [('run', errno.ENOSPC), ('replace', errno.EROFS)])
+    def test_storage_errors_are_errors(self, tmp_path, failing, error):
+        """ A full or read-only disk fails the conversion and leaves no half-written output behind """
+        source = tmp_path / 'in.avi'
+        source.write_bytes(b'x')
+        destination = tmp_path / 'out.mp4'
+
+        def write_output(command, **kwargs):  # pylint: disable=unused-argument
+            Path(command[-1]).write_bytes(b'partial')
+
+        broken = OSError(error, 'no')
+        run = patch.object(subprocess, 'run', side_effect=broken if failing == 'run' else write_output)
+        replace = patch.object(transcoding.os, 'replace', side_effect=broken if failing == 'replace' else None)
+        probe = probe_result({'codec_name': 'vp8', 'pix_fmt': 'yuv420p'})
+        with patch.object(transcoding.ffmpeg, 'probe', return_value=probe), run, replace:
+            with pytest.raises(TranscodeError):
+                make_web_playable(source, destination)
+
+        assert not destination.exists()
+        assert not partial_output_path(destination).exists()
+
+    def test_cleanup_failure_does_not_hide_the_error(self, tmp_path):
+        """ An output that cannot be removed is logged, and the conversion error still surfaces as the cause """
+        source = tmp_path / 'in.avi'
+        source.write_bytes(b'x')
+        probe = probe_result({'codec_name': 'vp8', 'pix_fmt': 'yuv420p'})
+        failure = subprocess.CalledProcessError(1, 'ffmpeg', stderr=b'boom')
+
+        with patch.object(transcoding.ffmpeg, 'probe', return_value=probe):
+            with patch.object(subprocess, 'run', side_effect=failure):
+                with patch.object(Path, 'unlink', side_effect=OSError(errno.EROFS, 'read-only')):
+                    with pytest.raises(TranscodeError) as error:
+                        make_web_playable(source, tmp_path / 'out.mp4')
+
+        assert error.value.__cause__ is failure
+
+
+class TestProbeHelpers:
+    """ Probing that must never raise, so one unreadable file cannot abort a batch """
+
+    def test_unreadable_file_needs_conversion(self, tmp_path):
+        """ A probe that cannot even start counts as not playable as it is """
+        path = tmp_path / 'x.mp4'
+        path.write_bytes(b'x')
+
+        with patch.object(transcoding.ffmpeg, 'probe', side_effect=FileNotFoundError('ffprobe')):
+            assert needs_conversion(path)
+
+    def test_duration_is_whole_seconds(self, tmp_path):
+        """ The container duration is truncated like VideoAsset.save() does """
+        with patch.object(transcoding.ffmpeg, 'probe', return_value={'format': {'duration': '12.9'}}):
+            assert probe_duration(tmp_path / 'x.mp4') == 12
+
+    @pytest.mark.parametrize('failure', [
+        {'side_effect': ffmpeg.Error('probe', b'', b'bad')},
+        {'side_effect': FileNotFoundError('ffprobe')},
+        {'return_value': {'format': {}}},
+        {'return_value': {'format': {'duration': 'N/A'}}},
+    ])
+    def test_unknown_duration_is_zero(self, tmp_path, failure):
+        """ No readable duration reads as 0, which callers treat as unknown """
+        with patch.object(transcoding.ffmpeg, 'probe', **failure):
+            assert probe_duration(tmp_path / 'x.mp4') == 0
 
 
 def test_partial_output_is_a_sibling_of_destination():
@@ -323,6 +399,29 @@ class TestConvertVideoAssetsCommand:
         assert not (media_storage / 'video_file' / 'old.avi').exists()
         assert asset.file_size == (media_storage / 'video_file' / 'old.mp4').stat().st_size
 
+    def test_conversion_repairs_an_asset_that_failed_to_probe(self, media_storage):
+        """ An asset whose original could not be probed gets its duration and becomes READY, so it can be published """
+        asset = self.stored_asset(media_storage, 'old.avi', '-c:v', 'mpeg4', '-c:a', 'libmp3lame')
+        VideoAsset.objects.filter(pk=asset.pk).update(status=VideoAsset.VideoStatus.FAILED, duration=0)
+
+        call_command('convert_videoassets', stdout=StringIO())
+
+        asset.refresh_from_db()
+        assert asset.status == VideoAsset.VideoStatus.READY
+        assert asset.duration in (1, 2)
+
+    def test_conversion_keeps_other_statuses_and_views(self, media_storage):
+        """ Only FAILED becomes READY; a PROCESSING asset stays so, and the views counted meanwhile are kept """
+        asset = self.stored_asset(media_storage, 'old.avi', '-c:v', 'mpeg4', '-c:a', 'libmp3lame')
+        VideoAsset.objects.filter(pk=asset.pk).update(status=VideoAsset.VideoStatus.PROCESSING, view_count=7)
+
+        call_command('convert_videoassets', stdout=StringIO())
+
+        asset.refresh_from_db()
+        assert asset.status == VideoAsset.VideoStatus.PROCESSING
+        assert asset.view_count == 7
+        assert asset.duration in (1, 2)
+
     def test_a_playable_mp4_is_left_alone(self, media_storage):
         """ Nothing is rewritten when the file already plays everywhere """
         asset = self.stored_asset(media_storage, 'fine.mp4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac')
@@ -391,6 +490,58 @@ class TestConvertVideoAssetsCommand:
         assert codecs(folder / asset.video_file.name)['video'] == 'h264'
         assert not original.exists()
         assert names_when_removed == [asset.video_file.name]
+
+
+@pytest.mark.django_db
+class TestOsFailureDuringFinalization:
+    """ A disk or binary problem fails the session once: the task's retry for OSError must not redo the conversion """
+
+    @pytest.fixture(autouse=True)
+    def real_conversion(self, monkeypatch, media_storage, upload_root):  # pylint: disable=unused-argument
+        """ Undo the conftest stub: these tests run the real conversion code with ffmpeg itself replaced """
+        monkeypatch.setattr(uploads, 'make_web_playable', make_web_playable)
+
+    def test_full_disk_fails_the_session(self, staff_client, session_for, media_storage):
+        """ The session ends FAILED with processing_failed instead of raising into the retrying task """
+        data = make_video(500)
+        session = session_for(data)
+        upload_in_chunks(staff_client, session.id, data, 128)
+        probe = probe_result({'codec_name': 'vp8', 'pix_fmt': 'yuv420p'})
+        disk_full = OSError(errno.ENOSPC, 'No space left on device')
+
+        with patch.object(transcoding.ffmpeg, 'probe', return_value=probe):
+            with patch.object(subprocess, 'run', side_effect=disk_full):
+                result = finalize_session(session.id)
+
+        assert (result.status, result.error_code) == (UploadSession.UploadStatus.FAILED, 'processing_failed')
+        assert not VideoAsset.objects.exists()
+        assert not list((media_storage / 'video_file').glob('*'))
+
+
+@pytest.mark.django_db
+class TestBackfillSurvivesOsErrors:
+    """ One asset the host cannot process must not stop the others or hide the summary """
+
+    @pytest.fixture(autouse=True)
+    def storage(self, media_storage):  # pylint: disable=unused-argument
+        """ Keep stored videos in a temporary directory """
+
+    def test_missing_ffmpeg_fails_each_asset_and_finishes(self, media_storage):
+        """ Every asset is counted as failed and left alone, and the run reaches its summary """
+        folder = media_storage / 'video_file'
+        folder.mkdir(parents=True, exist_ok=True)
+        for filename in ('a.avi', 'b.mp4'):
+            (folder / filename).write_bytes(b'original')
+            asset = VideoAsset.objects.create(title=filename, status=VideoAsset.VideoStatus.READY)
+            VideoAsset.objects.filter(pk=asset.pk).update(video_file=filename)
+
+        output = StringIO()
+        with patch.object(transcoding.ffmpeg, 'probe', side_effect=FileNotFoundError('ffprobe')):
+            call_command('convert_videoassets', stdout=output)
+
+        assert '0 converted, 0 already playable, 2 failed' in output.getvalue()
+        assert sorted(VideoAsset.objects.values_list('video_file', flat=True)) == ['a.avi', 'b.mp4']
+        assert sorted(path.name for path in folder.iterdir()) == ['a.avi', 'b.mp4']
 
 
 @pytest.mark.django_db
