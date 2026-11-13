@@ -29,6 +29,13 @@ DATABASES = {
 # RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS = 6
 # RESUMABLE_UPLOAD_RETENTION_DAYS = 7
 
+# Largest caption file (.vtt or .srt) accepted through the admin.
+# CAPTIONS_MAX_FILE_BYTES = 2 * 1024 ** 2
+
+# The default cache is Redis and holds the DRF throttle counters. It is configured only through the REDIS_CACHE_URL
+# environment variable (or .env), which defaults to redis://redis:6379/1, the Docker hostname. Outside Docker set
+# REDIS_CACHE_URL=redis://localhost:6379/1 in .env; assigning a variable of that name here has no effect.
+
 # Sentry error reporting is off while SENTRY_DSN is unset.
 # SENTRY_DSN = "https://<key>@<org>.ingest.sentry.io/<project>"
 # SENTRY_ENVIRONMENT = "local"

@@ -66,5 +66,6 @@ paths:
 - Dispatch from inside a transaction with `transaction.on_commit(partial(task.delay, ...))` so the worker never sees uncommitted rows (precedent: `events/v1/uploads.py`).
 - Retry transient failures declaratively with `autoretry_for=(...)`, `retry_backoff=True`, `retry_backoff_max`, `max_retries` (precedent: `finalize_upload_session`); do not hand-roll retry loops.
 - Guard state transitions with `select_for_update()` inside `transaction.atomic()`; use `nowait=True` for request paths and `skip_locked=True` for sweepers (precedent: `events/v1/uploads.py`).
+- Never hold a transaction or row lock across slow external work (ffmpeg, network): claim the work outside the database, run it, then lock, re-check the state and record the result in a short transaction (precedent: `finalize_session`, which claims with an `flock` on the partial file).
 - Use `logging`, not `print()`.
 - Pass IDs to tasks, not model instances.

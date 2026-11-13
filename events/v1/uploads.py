@@ -6,25 +6,28 @@ a partial file at exactly ``session.offset`` and the new offset is committed wit
 write, so the committed offset only ever names bytes that were fsynced. A crash between the write and the commit
 leaves surplus bytes behind the committed offset, which the next writer truncates away.
 
-When the last byte is committed the session moves to ``FINALIZING`` and a Celery task verifies the file, promotes it to
-the video storage and creates the ``VideoAsset``. Every step of that task is safe to run again.
+When the last byte is committed the session moves to ``FINALIZING`` and a Celery task verifies the file, converts it
+into the video storage and creates the ``VideoAsset``. Every step of that task is safe to run again. The conversion
+can take hours, so it runs without a transaction; only registering its outcome is transactional.
 """
 import errno
+import fcntl
 import hashlib
 import logging
 import os
 import shutil
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
-from typing import BinaryIO, Optional
+from typing import BinaryIO, Iterator, Optional
 from uuid import UUID
 
 from celery import current_app
 from kombu.exceptions import OperationalError as BrokerError
 from rest_framework import status
-from rest_framework.exceptions import APIException, ValidationError
+from rest_framework.exceptions import APIException
 
 from django.conf import settings
 from django.db import IntegrityError, OperationalError, transaction
@@ -32,7 +35,8 @@ from django.db.models import F, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
-from events.models import ALLOWED_VIDEO_EXTENSIONS, UploadSession, VideoAsset
+from events.models import UploadSession, VideoAsset
+from events.v1.transcoding import TranscodeError, make_web_playable, partial_output_path
 
 logger = logging.getLogger("asp_api")
 
@@ -42,6 +46,10 @@ READ_BLOCK_BYTES = 1024 * 1024
 SIGNATURE_BYTES = 12
 ORPHAN_GRACE_SECONDS = 3600
 FINALIZE_TIMEOUT_ERROR = "finalize_timeout"
+SIZE_MISMATCH_ERROR = "size_mismatch"
+INVALID_SIGNATURE_ERROR = "invalid_file_signature"
+CHECKSUM_MISMATCH_ERROR = "checksum_mismatch"
+PROCESSING_FAILED_ERROR = "processing_failed"
 QUICKTIME_ATOMS = (b"ftyp", b"moov", b"mdat", b"free", b"wide", b"skip", b"pnot")
 WEBM_MAGIC = b"\x1a\x45\xdf\xa3"
 LOCK_NOT_AVAILABLE_SQLSTATE = "55P03"
@@ -94,19 +102,13 @@ def file_extension(filename: str) -> str:
     return os.path.splitext(filename)[1].lower().lstrip(".")
 
 
-def validate_video_extension(filename: str) -> str:
-    """ Return ``filename`` unchanged if it has a supported video extension, otherwise raise a validation error """
-    extension = file_extension(filename)
-    if extension not in ALLOWED_VIDEO_EXTENSIONS:
-        raise ValidationError(
-            f"Unsupported file type '.{extension}'. Allowed formats: {', '.join(sorted(ALLOWED_VIDEO_EXTENSIONS))}."
-        )
-    return filename
-
-
 def final_storage_name(session: UploadSession) -> str:
-    """ Deterministic name inside the video storage, so an interrupted finalization can be resumed """
-    return f"{session.id}.{file_extension(session.filename)}"
+    """
+    Deterministic name inside the video storage, so an interrupted finalization can be resumed.
+
+    Every upload is stored as MP4 whatever it arrived as: it is converted to H.264/AAC on the way in.
+    """
+    return f"{session.id}.mp4"
 
 
 def has_valid_signature(header: bytes, extension: str) -> bool:
@@ -314,7 +316,7 @@ def _stream_to_file(path: Path, session: UploadSession, chunk: ChunkRequest) -> 
                 header += data[:SIGNATURE_BYTES - len(header)]
                 if len(header) == SIGNATURE_BYTES and not has_valid_signature(header, extension):
                     raise UploadAPIError(
-                        "invalid_file_signature", "The file content does not match its extension.",
+                        INVALID_SIGNATURE_ERROR, "The file content does not match its extension.",
                         status.HTTP_422_UNPROCESSABLE_ENTITY,
                     )
             handle.write(data)
@@ -332,7 +334,7 @@ def _write_chunk(session: UploadSession, chunk: ChunkRequest) -> None:
         digest = _stream_to_file(path, session, chunk)
         if chunk.checksum_sha256 and digest != chunk.checksum_sha256:
             raise UploadAPIError(
-                "checksum_mismatch", "The chunk checksum does not match its content.",
+                CHECKSUM_MISMATCH_ERROR, "The chunk checksum does not match its content.",
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
     except UploadAPIError:
@@ -386,20 +388,46 @@ def append_chunk(session_id: UUID, owner, chunk: ChunkRequest) -> UploadSession:
     return session
 
 
+def _discard_unused_asset(session: UploadSession) -> None:
+    """
+    Delete the asset a completed upload produced, together with its video and thumbnail files.
+
+    The asset row is locked like Event creation locks it, so a concurrent publish either wins (and the removal is
+    refused here) or loses (and is rejected because the asset is gone). An asset an event already uses is kept.
+    """
+    asset = VideoAsset.objects.select_for_update().filter(pk=session.video_asset_id).first()
+    if asset is None:
+        return
+    if asset.event_id is not None:
+        raise UploadAPIError(
+            "video_in_use", "This video is already used by a session and cannot be removed here.",
+            status.HTTP_409_CONFLICT, upload_status=session.status,
+        )
+    _discard_failed_asset(asset)
+    session.video_asset = None
+
+
 def cancel_session(session_id: UUID, owner) -> UploadSession:
-    """ Cancel an in-progress upload and discard its partial file. Already closed sessions are a no-op """
+    """
+    Cancel an upload and discard what it left on disk. Already closed sessions are a no-op.
+
+    An in-progress upload loses its partial file. A completed one loses its asset and video, unless an event
+    already uses that asset, which is refused with a 409.
+    """
     states = UploadSession.UploadStatus
     with transaction.atomic():
         session = _lock_session(session_id, owner)
         if session.status in (states.CANCELLED, states.EXPIRED, states.FAILED):
             return session
-        if session.status != states.UPLOADING:
+        if session.status == states.COMPLETED:
+            _discard_unused_asset(session)
+        elif session.status != states.UPLOADING:
             raise UploadAPIError(
                 "session_not_active", "This upload can no longer be cancelled.", status.HTTP_409_CONFLICT,
                 upload_status=session.status,
             )
         session.status = states.CANCELLED
-        session.save(update_fields=["status", "modified"])
+        session.save(update_fields=["status", "video_asset", "modified"])
         transaction.on_commit(partial(_remove_part, session.id))
     logger.info("upload_session_cancelled session=%s", session.id)
     return session
@@ -430,32 +458,24 @@ def _hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _source_file(session: UploadSession) -> Optional[Path]:
-    """ Where the finished bytes are: the partial file, or the promoted file if a previous attempt already moved it """
-    for candidate in (part_path(session.id), Path(asset_video_storage().path(final_storage_name(session)))):
-        if candidate.exists():
-            return candidate
-    return None
-
-
 def _verification_failure(session: UploadSession, source: Optional[Path]) -> str:
     """ Error code describing why the assembled file is unusable, or an empty string when it is sound """
     if source is None:
         logger.error(
             "upload_file_missing session=%s expected=%d part_root=%s", session.id, session.file_size, upload_root()
         )
-        return "size_mismatch"
+        return SIZE_MISMATCH_ERROR
     if source.stat().st_size != session.file_size:
         logger.error(
             "upload_size_mismatch session=%s expected=%d on_disk=%d", session.id, session.file_size,
             source.stat().st_size,
         )
-        return "size_mismatch"
+        return SIZE_MISMATCH_ERROR
     with open(source, "rb") as handle:
         if not has_valid_signature(handle.read(SIGNATURE_BYTES), file_extension(session.filename)):
-            return "invalid_file_signature"
+            return INVALID_SIGNATURE_ERROR
     if session.checksum_sha256 and _hash_file(source) != session.checksum_sha256:
-        return "checksum_mismatch"
+        return CHECKSUM_MISMATCH_ERROR
     return ""
 
 
@@ -463,64 +483,155 @@ def _fail_session(session: UploadSession, error_code: str) -> None:
     session.status = UploadSession.UploadStatus.FAILED
     session.error_code = error_code
     session.save(update_fields=["status", "error_code", "modified"])
-    _remove_part(session.id)
+    transaction.on_commit(partial(_remove_part, session.id))
     logger.error("upload_session_failed session=%s reason=%s", session.id, error_code)
 
 
-def _remove_promoted_file(session: UploadSession) -> None:
-    """ Drop the file a crashed finalization already moved into the video storage, as no asset references it """
+def _remove_video_file(storage_name: str) -> None:
     try:
-        Path(asset_video_storage().path(final_storage_name(session))).unlink(missing_ok=True)
+        Path(asset_video_storage().path(storage_name)).unlink(missing_ok=True)
     except OSError:
-        logger.exception("upload_promoted_remove_failed session=%s", session.id)
+        logger.exception("upload_video_remove_failed name=%s", storage_name)
 
 
-def _promote_file(session: UploadSession, source: Path) -> str:
-    """ Move the finished file into the video storage under its deterministic name """
-    name = final_storage_name(session)
-    destination = Path(asset_video_storage().path(name))
-    if source != destination:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(source), str(destination))
-    return name
+def _remove_promoted_file(session: UploadSession) -> None:
+    """ Drop the converted file and any half-written conversion a failed finalization left in the video storage """
+    destination = Path(asset_video_storage().path(final_storage_name(session)))
+    for leftover in (destination, partial_output_path(destination)):
+        _remove_video_file(leftover.name)
+
+
+def _remove_thumbnail(thumbnail_name: str) -> None:
+    try:
+        VideoAsset.thumbnail.field.storage.delete(thumbnail_name)
+    except OSError:
+        logger.exception("upload_thumbnail_remove_failed name=%s", thumbnail_name)
+
+
+def _discard_failed_asset(asset: VideoAsset) -> None:
+    """ Delete an asset row and, once committed, its video and thumbnail files """
+    video_name = asset.video_file.name
+    thumbnail_name = asset.thumbnail.name
+    asset.delete()
+    if video_name:
+        transaction.on_commit(partial(_remove_video_file, video_name))
+    if thumbnail_name:
+        transaction.on_commit(partial(_remove_thumbnail, thumbnail_name))
+
+
+@contextmanager
+def _finalization_claim(session_id: UUID) -> Iterator[bool]:
+    """
+    Claim the right to convert a session's file while the block runs; yields False when another worker holds it.
+
+    A conversion lasts hours, far too long for a transaction or a row lock: an idle-in-transaction timeout or a
+    connection pooler would kill it, and the owner's cancel and the stale-finalization sweep would be blocked or blind
+    meanwhile. An exclusive ``flock`` on the partial file keeps two workers (a redelivered task, the sweep's
+    re-queue) from writing the same output instead. The kernel drops it when the process dies, so a crashed worker
+    never blocks the retry. Without a partial file there is nothing to convert and the claim is granted.
+    """
+    with ExitStack() as stack:
+        claimed = True
+        try:
+            handle = stack.enter_context(open(part_path(session_id), "r+b"))
+        except FileNotFoundError:
+            pass
+        else:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                claimed = False
+        yield claimed
+
+
+def _prepare_video(session: UploadSession) -> str:
+    """
+    Verify the uploaded bytes and leave a browser-playable MP4 under the final name. Returns an error code or "".
+
+    The partial file is removed once the MP4 exists. If a previous attempt got that far and died before the commit,
+    only the MP4 is left, which is trusted as it is: it is only ever renamed into place when complete.
+    """
+    part = part_path(session.id)
+    has_part = part.exists()
+    destination = Path(asset_video_storage().path(final_storage_name(session)))
+    if not has_part and destination.exists():
+        return ""
+
+    source = part if has_part else None
+    failure = _verification_failure(session, source)
+    if failure:
+        return failure
+    try:
+        make_web_playable(part, destination)
+    except TranscodeError:
+        logger.exception("upload_conversion_failed session=%s", session.id)
+        return PROCESSING_FAILED_ERROR
+    part.unlink(missing_ok=True)
+    return ""
 
 
 def _create_asset(session: UploadSession, storage_name: str) -> VideoAsset:
-    """ Create the asset for a promoted file: READY once a duration was found, otherwise FAILED """
+    """ Create the asset for a converted file: READY once a duration was found, otherwise FAILED """
     return VideoAsset.create_with_status(os.path.splitext(session.filename)[0][:255], storage_name)
+
+
+def _register_asset(session: UploadSession) -> str:
+    """ Create the asset for the converted file and complete the session. Returns an error code or "" """
+    asset = _create_asset(session, final_storage_name(session))
+    if asset.status != VideoAsset.VideoStatus.READY:
+        _discard_failed_asset(asset)
+        return PROCESSING_FAILED_ERROR
+    session.video_asset = asset
+    session.status = UploadSession.UploadStatus.COMPLETED
+    session.save(update_fields=["video_asset", "status", "modified"])
+    return ""
+
+
+def _settle_finalization(session_id: UUID, failure: str) -> Optional[UploadSession]:
+    """
+    Record the outcome of a conversion in one short transaction, after checking the session still waits for it.
+
+    The session may have been settled while the conversion ran: another worker completed it, or the stuck-session
+    sweep failed it. A completed one owns the converted file; for any other state the file is an orphan and goes.
+    """
+    with transaction.atomic():
+        session = UploadSession.objects.select_for_update().filter(pk=session_id).first()
+        if session is None:
+            return None
+        if session.status != UploadSession.UploadStatus.FINALIZING:
+            if session.status != UploadSession.UploadStatus.COMPLETED:
+                transaction.on_commit(partial(_remove_promoted_file, session))
+            return session
+
+        failure = failure or _register_asset(session)
+        if failure:
+            _fail_session(session, failure)
+    return session
 
 
 def finalize_session(session_id: UUID) -> Optional[UploadSession]:
     """
-    Verify, promote and register a fully uploaded file. Idempotent and safe under concurrent or repeated calls.
+    Verify, convert and register a fully uploaded file. Idempotent and safe under concurrent or repeated calls.
 
-    The row lock is skipped rather than awaited, so a second worker returns immediately while the first one works.
-    The asset row is created in the same transaction that completes the session: a crash before the commit rolls the
-    row back, and because the promoted file keeps a deterministic name the retry picks up where the crash happened.
-    Returns None when the session does not exist or is being finalized elsewhere.
+    Three steps, with no transaction open while the file is verified and converted (see ``_finalization_claim``):
+    read the session, convert under the file claim, then settle the outcome in one short transaction. The asset row is
+    created in that transaction together with the session update, so a crash before the commit rolls the row back, and
+    because the converted file keeps a deterministic name the retry picks up where the crash happened.
+    Returns None when the session does not exist or another worker is converting its file.
     """
-    with transaction.atomic():
-        session = UploadSession.objects.select_for_update(skip_locked=True).filter(pk=session_id).first()
-        if session is None or session.status != UploadSession.UploadStatus.FINALIZING:
-            return session
+    session = UploadSession.objects.filter(pk=session_id).first()
+    if session is None or session.status != UploadSession.UploadStatus.FINALIZING:
+        return session
 
-        source = _source_file(session)
-        failure = _verification_failure(session, source)
-        if failure:
-            _fail_session(session, failure)
-            return session
+    with _finalization_claim(session.id) as claimed:
+        if not claimed:
+            return None
+        failure = _prepare_video(session)
+        settled = _settle_finalization(session.id, failure)
 
-        asset = _create_asset(session, _promote_file(session, source))
-        session.video_asset = asset
-        if asset.status == VideoAsset.VideoStatus.READY:
-            session.status = UploadSession.UploadStatus.COMPLETED
-        else:
-            session.status = UploadSession.UploadStatus.FAILED
-            session.error_code = "processing_failed"
-        session.save(update_fields=["video_asset", "status", "error_code", "modified"])
-
-    logger.info("upload_session_finalized session=%s result=%s", session.id, session.status)
-    return session
+    if settled is not None:
+        logger.info("upload_session_finalized session=%s result=%s", settled.id, settled.status)
+    return settled
 
 
 def _expire_sessions(now) -> int:
@@ -588,9 +699,12 @@ def _remove_orphan_parts(now) -> int:
         try:
             if now.timestamp() - path.stat().st_mtime < ORPHAN_GRACE_SECONDS:
                 continue
+            path.unlink(missing_ok=True)
         except FileNotFoundError:
             continue
-        path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("upload_orphan_remove_failed file=%s", path.name)
+            continue
         removed += 1
     return removed
 

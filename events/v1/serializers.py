@@ -1,19 +1,46 @@
 import base64
 import binascii
+import logging
 import os
+from functools import partial
 
 from rest_framework import serializers
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.urls import reverse
 
-from events.models import Event, EventPresenter, Playlist, Tag, UploadSession, VideoAsset
-from events.v1.uploads import clean_display_filename, confirmed_offset, validate_video_extension
+from events.models import (
+    Event,
+    EventPresenter,
+    Playlist,
+    Tag,
+    UploadSession,
+    VideoAsset,
+    validate_video_extension,
+    validate_video_filename,
+)
+from events.v1.streaming import video_playback_type
+from events.v1.uploads import clean_display_filename, confirmed_offset
 
+logger = logging.getLogger("asp_api")
 user_model = get_user_model()
 
 VIDEO_ASSET_ASSIGNED_ERROR = 'This video asset is already assigned to an event.'
+# The model's TextField has no limit of its own; this mirrors the 5000-character limit of the frontend upload form.
+EVENT_DESCRIPTION_MAX_LENGTH = 5000
+
+
+def video_stream_path(event_slug: str | None) -> str:
+    """
+    Path of the authenticated endpoint that streams an event's video; raw ``/media/`` URLs are never exposed.
+
+    Returns ``''`` for an event without a slug, which the ``<slug:event_slug>`` route cannot address.
+    """
+    if not event_slug:
+        return ''
+    return reverse('video-asset-stream', args=[event_slug])
 
 
 class PublisherSerializer(serializers.ModelSerializer):
@@ -59,49 +86,66 @@ class EventSerializer(serializers.ModelSerializer):
     @staticmethod
     def get_tags(event):
         """ Get the tags of an event """
-        return event.tags.all().values_list('name', flat=True)
+        return [tag.name for tag in event.tags.all()]
 
     @staticmethod
     def get_thumbnail(event):
-        """ Get thumbnail of an event if available """
-        video = event.videos.first()
+        """ Thumbnail of the video the stream plays, if available """
+        video = event.playable_video()
         return video.thumbnail.url if video and video.thumbnail else ''
 
     @staticmethod
     def get_video_file(event):
-        """ Get video file of an event if available """
-        video = event.videos.first()
-        return video.video_file.url if video and video.video_file else ''
+        """ Authenticated stream endpoint of the event's video if available (never the raw media URL) """
+        return video_stream_path(event.slug) if event.playable_video() else ''
 
     @staticmethod
     def get_video_duration(event):
-        """ Get duration of video if available """
-        video = event.videos.first()
+        """ Duration of the video the stream plays, if available """
+        video = event.playable_video()
         return video.duration if video and video.duration else None
 
     @staticmethod
     def get_presenters(event):
         """ Get presenters of an event """
-        event_presenters = EventPresenter.objects.filter(event=event).select_related('user')
-        return EventPresenterSerializer(event_presenters, many=True).data
+        return EventPresenterSerializer(event.eventpresenter_set.all(), many=True).data
 
     @staticmethod
     def get_playlists(event):
         """ Get the playlists of an event """
-        return event.playlists.all().values_list('name', flat=True)
+        return [playlist.name for playlist in event.playlists.all()]
 
 
 class VideoAssetSerializer(serializers.ModelSerializer):
     """ Serializer for the VideoAsset model """
 
     event = EventSerializer()
+    video_file = serializers.SerializerMethodField()
+    video_type = serializers.SerializerMethodField()
 
     class Meta:
         model = VideoAsset
         fields = (
-            'title', 'video_file', 'duration', 'thumbnail', 'status', 'file_size', 'view_count', 'event',
+            'title', 'video_file', 'video_type', 'duration', 'thumbnail', 'status', 'file_size', 'view_count', 'event',
             'captions_file',
         )
+
+    @staticmethod
+    def get_video_file(video_asset):
+        """
+        Stream endpoint of the event's playable video, same as ``EventSerializer``; ``''`` without an event.
+
+        Callers must load the event through ``Event.objects.with_card_data()`` so ``videos`` is prefetched.
+        """
+        event = video_asset.event
+        return EventSerializer.get_video_file(event) if event else ''
+
+    @staticmethod
+    def get_video_type(video_asset) -> str:
+        """ Media type the player should declare for ``video_file``; ``''`` when there is no playable video """
+        event = video_asset.event
+        video = event.playable_video() if event else None
+        return video_playback_type(video.video_file.name) if video else ''
 
 
 class TagListSerializer(serializers.ModelSerializer):
@@ -120,17 +164,12 @@ class PlaylistListSerializer(serializers.ModelSerializer):
 
 class VideoAssetCreateSerializer(serializers.ModelSerializer):
     """ Serializer for creating a VideoAsset via file upload """
-    video_file = serializers.FileField(required=True)
+    video_file = serializers.FileField(required=True, validators=[validate_video_extension])
 
     class Meta:
         model = VideoAsset
         fields = ('id', 'title', 'video_file', 'status')
         read_only_fields = ('id', 'title', 'status')
-
-    def validate_video_file(self, value):
-        """ Ensure the uploaded file has a supported video extension """
-        validate_video_extension(value.name)
-        return value
 
     def create(self, validated_data):
         """ Create the asset and mark it READY or FAILED """
@@ -164,6 +203,7 @@ class EventCreateSerializer(serializers.ModelSerializer):
             'title', 'description', 'event_time', 'playlists', 'tags',
             'presenter_ids', 'video_asset_id', 'thumbnail',
         )
+        extra_kwargs = {'description': {'max_length': EVENT_DESCRIPTION_MAX_LENGTH}}
 
     def validate_video_asset_id(self, value):
         """ Ensure the video is processed and not already assigned to another event """
@@ -208,16 +248,31 @@ class EventCreateSerializer(serializers.ModelSerializer):
             [EventPresenter(event=event, user=user) for user in dict.fromkeys(presenters)]
         )
 
-        asset_changes = {'event': event}
+        VideoAsset.objects.filter(pk=video_asset.pk).update(event=event)
         if thumbnail:
-            video_asset.thumbnail.save(thumbnail.name, thumbnail, save=False)
-            asset_changes['thumbnail'] = video_asset.thumbnail.name
-        VideoAsset.objects.filter(pk=video_asset.pk).update(**asset_changes)
+            transaction.on_commit(partial(self.store_thumbnail, video_asset, thumbnail))
 
         return event
 
+    @staticmethod
+    def store_thumbnail(video_asset, thumbnail):
+        """
+        Write the uploaded cover and point the asset at it.
+
+        Runs after the event transaction commits, so a rollback never leaves an orphan file behind. A storage failure
+        is logged and the event keeps the thumbnail generated from the video.
+        """
+        try:
+            video_asset.thumbnail.save(thumbnail.name, thumbnail, save=False)
+        except OSError:
+            logger.exception("event_thumbnail_store_failed asset=%s", video_asset.pk)
+            return
+        VideoAsset.objects.filter(pk=video_asset.pk).update(thumbnail=video_asset.thumbnail.name)
+
     def to_representation(self, instance):
-        return EventSerializer(instance, context=self.context).data
+        """ Serialize a freshly loaded event so presenters, tags and videos cost no per-row queries """
+        event = Event.objects.with_card_data().get(pk=instance.pk)
+        return EventSerializer(event, context=self.context).data
 
 
 class UploadSessionCreateSerializer(serializers.Serializer):
@@ -229,7 +284,9 @@ class UploadSessionCreateSerializer(serializers.Serializer):
 
     def validate_filename(self, value):
         """ Keep a display-only name and require a supported video extension """
-        return validate_video_extension(clean_display_filename(value))
+        filename = clean_display_filename(value)
+        validate_video_filename(filename)
+        return filename
 
     def validate_file_size(self, value):
         """ Reject files above the configured upload limit """
@@ -278,8 +335,8 @@ class UploadSessionSerializer(serializers.ModelSerializer):
     offset = serializers.SerializerMethodField()
     video_asset_id = serializers.IntegerField(read_only=True)
     upload_status = serializers.CharField(source='status', read_only=True)
-    chunk_size = serializers.IntegerField(read_only=True, help_text='Chunk size the client should use')
-    max_chunk_size = serializers.IntegerField(read_only=True, help_text='Largest chunk the server accepts')
+    chunk_size = serializers.SerializerMethodField(help_text='Chunk size the client should use')
+    max_chunk_size = serializers.SerializerMethodField(help_text='Largest chunk the server accepts')
 
     class Meta:
         model = UploadSession
@@ -294,9 +351,12 @@ class UploadSessionSerializer(serializers.ModelSerializer):
         """ Committed bytes the client does not need to send again """
         return confirmed_offset(session)
 
-    def to_representation(self, instance):
-        """ Add the chunk limits, which come from settings rather than from the session """
-        data = super().to_representation(instance)
-        data['chunk_size'] = settings.RESUMABLE_UPLOAD_CHUNK_BYTES
-        data['max_chunk_size'] = settings.RESUMABLE_UPLOAD_MAX_CHUNK_BYTES
-        return data
+    @staticmethod
+    def get_chunk_size(_session) -> int:
+        """ Chunk size the client should use, from settings rather than from the session """
+        return settings.RESUMABLE_UPLOAD_CHUNK_BYTES
+
+    @staticmethod
+    def get_max_chunk_size(_session) -> int:
+        """ Largest chunk the server accepts, from settings rather than from the session """
+        return settings.RESUMABLE_UPLOAD_MAX_CHUNK_BYTES
