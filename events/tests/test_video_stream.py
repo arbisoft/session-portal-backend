@@ -420,9 +420,8 @@ class TestPlayableAssetSelection:
 @pytest.mark.django_db
 class TestDuplicateSlugStream:
     """
-    Slugs are not unique. These tests pin the lowest-pk-wins rule for duplicate slugs: the lowest-pk event
-    owns the slug. They are characterization tests, not a regression guard against a 500, because
-    QuerySet.first() already orders by pk and would pass against the pre-fix view too.
+    Slugs are not unique. The stream resolves the asset with ``event_videos``, like the video detail and the view
+    count: a video with a file beats one without, then the lowest event pk wins.
     """
 
     url = staticmethod(lambda: reverse('video-asset-stream', args=['dup']))
@@ -440,11 +439,33 @@ class TestDuplicateSlugStream:
         assert response['Content-Length'] == '10'
         assert body(response) == b'A' * 10
 
-    def test_lowest_pk_event_without_file_is_404(self, user_client, media_storage):
+    def test_event_with_a_file_beats_a_lower_pk_without(self, user_client, media_storage):
+        """ The lowest-pk event has nothing to play, so the stream serves the next event's file instead of a 404 """
         VideoAssetFactory(event=EventFactory(slug='dup'), video_file=None)
         attach_file(VideoAssetFactory(event=EventFactory(slug='dup')), content=b'B' * 20, name='b.mp4')
+        response = user_client.get(self.url())
+        assert response.status_code == status.HTTP_200_OK
+        assert body(response) == b'B' * 20
+
+    def test_slug_without_any_file_is_404(self, user_client):
+        VideoAssetFactory(event=EventFactory(slug='dup'), video_file=None)
+        VideoAssetFactory(event=EventFactory(slug='dup'), video_file=None)
         assert user_client.get(self.url()).status_code == status.HTTP_404_NOT_FOUND
         assert user_client.head(self.url()).status_code == status.HTTP_404_NOT_FOUND
+
+    def test_stream_detail_and_view_count_agree(self, user_client, media_storage):
+        """ The three endpoints resolve the same asset, so the player never meets a 404 after a 200 """
+        VideoAssetFactory(event=EventFactory(slug='dup'), video_file=None, title='Nothing to play')
+        playable = attach_file(
+            VideoAssetFactory(event=EventFactory(slug='dup'), title='Playable'), content=b'B' * 20, name='b.mp4'
+        )
+        detail = user_client.get(reverse('video-asset-detail', args=['dup']))
+        counted = user_client.post(reverse('video-asset-increment-view', args=['dup']))
+        streamed = user_client.get(self.url())
+        assert (detail.status_code, counted.status_code, streamed.status_code) == (200, 200, 200)
+        assert detail.data['title'] == 'Playable'
+        assert VideoAsset.objects.get(pk=playable.pk).view_count == 1
+        assert body(streamed) == b'B' * 20
 
 
 @pytest.mark.django_db

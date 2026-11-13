@@ -29,6 +29,41 @@ class TestEventsAPI:
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data["results"]) == 3
 
+    def test_event_with_several_videos_is_listed_once(self, user_client):
+        """ Joining on videos used to repeat an event once per video and inflate the page count """
+        VideoAssetFactory.create_batch(3, event=EventFactory(slug='multi'))
+        VideoAssetFactory(event=EventFactory(slug='single'))
+
+        response = user_client.get(reverse("events-list"))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["count"] == 2
+        assert sorted(result["slug"] for result in response.data["results"]) == ["multi", "single"]
+
+    def test_card_describes_the_video_the_stream_plays(self, user_client):
+        """ Thumbnail and duration come from the playable video, not from a lower-pk one that has no file """
+        event = EventFactory(slug='talk')
+        unplayable = VideoAssetFactory(event=event, duration=10)
+        playable = VideoAssetFactory(event=event, duration=99)
+        make_playable(playable)
+        VideoAsset.objects.filter(pk=unplayable.pk).update(thumbnail='empty.jpg')
+        VideoAsset.objects.filter(pk=playable.pk).update(thumbnail='playable.jpg')
+
+        response = user_client.get(reverse("events-list"))
+
+        card = response.data["results"][0]
+        assert card["video_duration"] == 99
+        assert card["thumbnail"].endswith('playable.jpg')
+        assert card["video_file"] == reverse("video-asset-stream", args=['talk'])
+
+    def test_card_without_a_playable_video_is_empty(self, user_client):
+        """ Nothing to play means no thumbnail, duration or stream path """
+        VideoAssetFactory(event=EventFactory(slug='talk'), duration=10)
+
+        card = user_client.get(reverse("events-list")).data["results"][0]
+
+        assert (card["video_duration"], card["thumbnail"], card["video_file"]) == (None, '', '')
+
     def test_list_events_with_and_without_videoasset(self, user_client):
         """ Test that /events/all returns only events with linked VideoAssets """
 
@@ -254,6 +289,26 @@ class TestEventsAPI:
         returned_ids = [e["id"] for e in response.data["results"]]
         assert returned_ids == [other.id for other in reversed(others)][:5]
 
+    def test_recommendations_for_a_duplicate_slug(self, user_client):
+        """ Slugs are not unique: the lowest-pk event is the current one instead of the request failing with a 500 """
+        tag = TagFactory()
+        older = EventFactory(slug='talk')
+        EventFactory(slug='talk')
+        older.tags.add(tag)
+        related = EventFactory(slug='related')
+        related.tags.add(tag)
+
+        response = user_client.get(reverse("recommendation", args=['talk']))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [result["id"] for result in response.data["results"]] == [related.id]
+
+    def test_recommendations_for_an_unknown_slug(self, user_client):
+        """ A slug nobody has is a 404 """
+        response = user_client.get(reverse("recommendation", args=['missing']))
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
     def test_event_recommendations_query_count(self, user_client, django_assert_max_num_queries):
         """ Serializing a page of recommendations costs a fixed number of queries, whatever the page holds """
         tag, presenter = TagFactory(), UserFactory()
@@ -280,13 +335,23 @@ def make_playable(*assets):
 class TestEventVideosOrdering:
     """ Test cases for the lookup shared by the detail and view count endpoints """
 
-    def test_lowest_event_pk_comes_first(self):
-        """ With a duplicate slug the older event wins, even when its video has no file """
+    def test_playable_video_beats_a_lower_event_pk(self):
+        """ With a duplicate slug a video with a file wins over an older event's video without one """
         older = EventFactory(slug='talk')
         newer = EventFactory(slug='talk')
         newer_asset = VideoAssetFactory(event=newer)
         older_asset = VideoAssetFactory(event=older)
         make_playable(newer_asset)
+
+        assert list(event_videos('talk')) == [newer_asset, older_asset]
+
+    def test_lowest_event_pk_breaks_a_tie(self):
+        """ Among videos that all have a file the older event owns the slug """
+        older = EventFactory(slug='talk')
+        newer = EventFactory(slug='talk')
+        newer_asset = VideoAssetFactory(event=newer)
+        older_asset = VideoAssetFactory(event=older)
+        make_playable(newer_asset, older_asset)
 
         assert list(event_videos('talk')) == [older_asset, newer_asset]
 
@@ -381,8 +446,9 @@ class TestVideoAssetDetailDuplicateSlugs:
         response = user_client.get(reverse("video-asset-detail", args=['talk']))
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["title"] == "No file"
-        assert response.data["event"]["id"] == older.id
+        assert response.data["title"] == "Newer playable"
+        assert response.data["event"]["id"] == newer.id
+        assert response.data["video_file"] == reverse("video-asset-stream", args=['talk'])
 
     def test_playable_asset_preferred_in_event(self, user_client):
         """ Within one event the video with a file is described """

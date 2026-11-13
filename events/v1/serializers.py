@@ -90,8 +90,8 @@ class EventSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_thumbnail(event):
-        """ Get thumbnail of an event if available """
-        video = event.first_video()
+        """ Thumbnail of the video the stream plays, if available """
+        video = event.playable_video()
         return video.thumbnail.url if video and video.thumbnail else ''
 
     @staticmethod
@@ -101,8 +101,8 @@ class EventSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_video_duration(event):
-        """ Get duration of video if available """
-        video = event.first_video()
+        """ Duration of the video the stream plays, if available """
+        video = event.playable_video()
         return video.duration if video and video.duration else None
 
     @staticmethod

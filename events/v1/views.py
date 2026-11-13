@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from django.db.models import F, Max, Prefetch
+from django.db.models import Exists, F, Max, OuterRef, Prefetch
 from django.http import Http404
 
 from events.models import Event, Playlist, Tag, VideoAsset
@@ -63,7 +63,7 @@ def session_response(session, http_status=status.HTTP_200_OK) -> Response:
 class EventsListView(ListAPIView):
     """ View for listing the events """
 
-    queryset = Event.objects.filter(videos__isnull=False).with_card_data()
+    queryset = Event.objects.filter(Exists(VideoAsset.objects.filter(event=OuterRef('pk')))).with_card_data()
     serializer_class = EventSerializer
     pagination_class = CustomPageNumberPagination
     filterset_class = EventFilter
@@ -101,15 +101,11 @@ class VideoAssetStreamView(APIView):
         """
         Stream the event's playable video; authentication is enforced by the default ``IsAuthenticated`` permission.
 
-        The asset is chosen by ``Event.playable_video``, the same rule the serializers use to advertise the stream.
-        Event slugs are not unique; like ``QuerySet.first()``, the lowest pk wins, which is also why this does not use
-        ``get_object_or_404`` (it would raise ``MultipleObjectsReturned``).
+        The asset comes from ``event_videos``, the same resolver the video detail and the view count use, so the
+        three endpoints agree even when event slugs are not unique. An asset without a file is a 404.
         """
-        event = Event.objects.filter(slug=event_slug).prefetch_related('videos').first()
-        if event is None:
-            raise Http404
-        video_asset = event.playable_video()
-        if video_asset is None:
+        video_asset = event_videos(event_slug).first()
+        if video_asset is None or not video_asset.video_file:
             raise Http404
         return stream_file_field(request, video_asset.video_file)
 

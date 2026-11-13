@@ -125,11 +125,11 @@ class TestIncrementViewCountAPI:
         counts = dict(VideoAsset.objects.values_list('pk', 'view_count'))
         assert counts == {unplayable.pk: 0, first_playable.pk: 1, second_playable.pk: 0}
 
-    def test_duplicate_slug_prefers_lowest_event(self, user_client):
-        """ The event with the lowest pk is counted when several share the slug """
+    def test_duplicate_slug_prefers_lowest_playable_event(self, user_client):
+        """ Of several events sharing the slug the lowest pk wins when each has a playable video """
         older_asset = VideoAssetFactory(event=EventFactory(slug='talk'))
         newer_asset = VideoAssetFactory(event=EventFactory(slug='talk'))
-        make_playable(newer_asset)
+        make_playable(older_asset, newer_asset)
 
         response = user_client.post(reverse('video-asset-increment-view', args=['talk']))
 
@@ -137,6 +137,18 @@ class TestIncrementViewCountAPI:
         assert response.data == {'view_count': 1}
         assert VideoAsset.objects.get(pk=older_asset.pk).view_count == 1
         assert VideoAsset.objects.get(pk=newer_asset.pk).view_count == 0
+
+    def test_duplicate_slug_counts_the_streamed_asset(self, user_client):
+        """ A playable video in a newer event is counted, because that is the one the stream serves """
+        older_asset = VideoAssetFactory(event=EventFactory(slug='talk'))
+        newer_asset = VideoAssetFactory(event=EventFactory(slug='talk'))
+        make_playable(newer_asset)
+
+        response = user_client.post(reverse('video-asset-increment-view', args=['talk']))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert VideoAsset.objects.get(pk=older_asset.pk).view_count == 0
+        assert VideoAsset.objects.get(pk=newer_asset.pk).view_count == 1
 
     def test_increment_runs_two_queries(self, user_client, django_assert_num_queries):
         """ One update resolves and increments the asset, one read returns the new value """

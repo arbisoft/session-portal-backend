@@ -1,6 +1,6 @@
 from django.db.models import Case, Count, IntegerField, OuterRef, Q, QuerySet, Subquery, Value, When
 from django.db.models.functions import Coalesce
-from django.shortcuts import get_object_or_404
+from django.http import Http404
 
 from events.models import Event, VideoAsset
 
@@ -11,21 +11,21 @@ FALLBACK_EVENT_COUNT = 5
 
 def event_videos(event_slug: str) -> QuerySet[VideoAsset]:
     """
-    Videos of the event with this slug, ordered so that the first row is the one the stream endpoint serves.
+    Videos of the events with this slug, ordered so that the first row is the one the stream endpoint serves.
 
-    SQL counterpart of ``Event.playable_video`` (``first_video(only_playable=True)``) only; ``first_video()`` without
-    an argument ignores whether a video has a file. Within one event a video with a file beats one without, then
-    the lowest video pk wins. Slugs are not unique and rows are ordered by event pk first, so with duplicate slugs
-    this skips to a later event when the lowest-pk event has no videos, whereas ``VideoAssetStreamView`` takes
-    the first event with that slug and returns 404 if it has no playable video. Callers take ``.first()`` (or a
-    ``[:1]`` subquery) instead of ``get_object_or_404`` so duplicates never raise ``MultipleObjectsReturned``.
+    The stream, the video detail and the view count all resolve the asset through this queryset, so they cannot
+    disagree. A video with a file beats one without; ties go to the lowest event pk, then the lowest video pk. For a
+    single event this is ``Event.playable_video`` (``first_video(only_playable=True)``); ``first_video()`` without an
+    argument ignores whether a video has a file. Slugs are not unique, so the order also decides between events that
+    share one: the lowest-pk event that has a playable video owns the slug. Callers take ``.first()`` (or a ``[:1]``
+    subquery) instead of ``get_object_or_404`` so duplicates never raise ``MultipleObjectsReturned``.
     """
     without_file = Case(
         When(Q(video_file__isnull=True) | Q(video_file=''), then=Value(1)),
         default=Value(0),
         output_field=IntegerField(),
     )
-    return VideoAsset.objects.filter(event__slug=event_slug).order_by('event_id', without_file, 'pk')
+    return VideoAsset.objects.filter(event__slug=event_slug).order_by(without_file, 'event_id', 'pk')
 
 
 def _shared_count(event: Event, field_name: str) -> Coalesce:
@@ -51,9 +51,12 @@ def get_similar_events(event_slug: str) -> QuerySet[Event]:
     Relevance is the weighted sum of shared playlists, presenters and tags (playlist 3, presenter 2, tag 1), so three
     shared tags tie one shared playlist. Ties go to the newest event, then the highest id. The current event is never
     included. Only when nothing is related are the latest published events returned instead, so the list is not
-    empty. The queryset is lazy so pagination prefetches card data for one page only.
+    empty. The queryset is lazy so pagination prefetches card data for one page only. Slugs are not unique: the
+    lowest-pk event with this slug is the current one, and a slug nobody has is a 404.
     """
-    event = get_object_or_404(Event, slug=event_slug)
+    event = Event.objects.filter(slug=event_slug).order_by('pk').first()
+    if event is None:
+        raise Http404
     candidates = Event.objects.with_card_data().filter(status=Event.EventStatus.PUBLISHED).exclude(id=event.id)
 
     relevance = Value(0, output_field=IntegerField())
