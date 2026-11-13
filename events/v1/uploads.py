@@ -30,7 +30,7 @@ from rest_framework import status
 from rest_framework.exceptions import APIException
 
 from django.conf import settings
-from django.db import IntegrityError, OperationalError, transaction
+from django.db import IntegrityError, OperationalError, connection, transaction
 from django.db.models import F, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -525,10 +525,11 @@ def _finalization_claim(session_id: UUID) -> Iterator[bool]:
     Claim the right to convert a session's file while the block runs; yields False when another worker holds it.
 
     A conversion lasts hours, far too long for a transaction or a row lock: an idle-in-transaction timeout or a
-    connection pooler would kill it, and the owner's cancel and the stale-finalization sweep would be blocked or blind
-    meanwhile. An exclusive ``flock`` on the partial file keeps two workers (a redelivered task, the sweep's
-    re-queue) from writing the same output instead. The kernel drops it when the process dies, so a crashed worker
-    never blocks the retry. Without a partial file there is nothing to convert and the claim is granted.
+    connection pooler would kill it, and the stale-finalization sweep would be blind to it meanwhile. An exclusive
+    ``flock`` on the partial file keeps two workers (a redelivered task, the sweep's re-queue) from writing the same
+    output instead, and lets the sweep tell a live conversion from a dead one. The kernel drops it when the process
+    dies, so a crashed worker never blocks the retry. Without a partial file there is nothing to convert and the
+    claim is granted.
     """
     with ExitStack() as stack:
         claimed = True
@@ -542,6 +543,12 @@ def _finalization_claim(session_id: UUID) -> Iterator[bool]:
             except BlockingIOError:
                 claimed = False
         yield claimed
+
+
+def _release_idle_connection() -> None:
+    """ Close the DB connection before a conversion that lasts hours; Django reconnects on the next query """
+    if not connection.in_atomic_block:
+        connection.close()
 
 
 def _prepare_video(session: UploadSession) -> str:
@@ -614,9 +621,10 @@ def finalize_session(session_id: UUID) -> Optional[UploadSession]:
     Verify, convert and register a fully uploaded file. Idempotent and safe under concurrent or repeated calls.
 
     Three steps, with no transaction open while the file is verified and converted (see ``_finalization_claim``):
-    read the session, convert under the file claim, then settle the outcome in one short transaction. The asset row is
-    created in that transaction together with the session update, so a crash before the commit rolls the row back, and
-    because the converted file keeps a deterministic name the retry picks up where the crash happened.
+    read the session, convert under the file claim, then settle the outcome in one short transaction. Once the claim
+    is granted the idle DB connection is closed, so it cannot time out during the conversion. The asset row is
+    created in the settling transaction together with the session update, so a crash before the commit rolls the row
+    back, and because the converted file keeps a deterministic name the retry picks up where the crash happened.
     Returns None when the session does not exist or another worker is converting its file.
     """
     session = UploadSession.objects.filter(pk=session_id).first()
@@ -626,6 +634,7 @@ def finalize_session(session_id: UUID) -> Optional[UploadSession]:
     with _finalization_claim(session.id) as claimed:
         if not claimed:
             return None
+        _release_idle_connection()
         failure = _prepare_video(session)
         settled = _settle_finalization(session.id, failure)
 
@@ -652,7 +661,13 @@ def _expire_sessions(now) -> int:
 
 
 def _fail_stuck_finalizations(now) -> int:
-    """ Fail sessions that stayed FINALIZING past the deadline, so a poison session is not re-queued forever """
+    """
+    Fail sessions that stayed FINALIZING past the deadline, so a poison session is not re-queued forever.
+
+    A session whose file is claimed by a live worker is skipped, as that conversion is not stuck. An unreadable
+    partial file is logged at error level and skipped, so it cannot abort the rest of the cleanup. The session then
+    stays FINALIZING until the storage is fixed: it is not failed blind, as a live conversion cannot be ruled out.
+    """
     cutoff = now - timedelta(hours=settings.RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS)
     stuck = UploadSession.objects.filter(status=UploadSession.UploadStatus.FINALIZING, modified__lte=cutoff)
     failed = 0
@@ -663,9 +678,15 @@ def _fail_stuck_finalizations(now) -> int:
             ).first()
             if session is None:
                 continue
-            _fail_session(session, FINALIZE_TIMEOUT_ERROR)
-            transaction.on_commit(partial(_remove_promoted_file, session))
-            failed += 1
+            try:
+                with _finalization_claim(session_id) as claimed:
+                    if not claimed:
+                        continue
+                    _fail_session(session, FINALIZE_TIMEOUT_ERROR)
+                    transaction.on_commit(partial(_remove_promoted_file, session))
+                    failed += 1
+            except OSError:
+                logger.exception("upload_stuck_claim_failed session=%s", session_id)
     return failed
 
 

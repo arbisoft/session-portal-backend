@@ -272,6 +272,53 @@ class TestUploadCleanup:
         assert summary['finalizations_failed'] == 0
         assert session.status == UploadSession.UploadStatus.FINALIZING
 
+    def test_converting_stuck_finalization_is_kept(
+        self, staff_client, session_for, settings, django_capture_on_commit_callbacks
+    ):
+        """ A session past the deadline whose file a live worker holds is not failed and keeps its partial file """
+        data = make_video(100)
+        session = session_for(data)
+        send_chunk(staff_client, session.id, 0, data)
+        expired = timezone.now() - timedelta(hours=settings.RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS + 1)
+        UploadSession.objects.filter(pk=session.pk).update(modified=expired)
+
+        with open(part_path(session.id), 'rb') as live_worker:
+            fcntl.flock(live_worker, fcntl.LOCK_EX)
+            with patch('events.v1.uploads.current_app.send_task'), django_capture_on_commit_callbacks(execute=True):
+                summary = cleanup_sessions()
+
+        session.refresh_from_db()
+        assert summary['finalizations_failed'] == 0
+        assert session.status == UploadSession.UploadStatus.FINALIZING
+        assert part_path(session.id).exists()
+
+    def test_unreadable_stuck_part_does_not_abort_sweep(
+        self, staff_client, session_for, settings, caplog
+    ):
+        """ A stuck session whose partial file cannot be opened is logged and skipped, later cleanup steps still run """
+        data = make_video(100)
+        stuck = session_for(data)
+        send_chunk(staff_client, stuck.id, 0, data)
+        expired = timezone.now() - timedelta(hours=settings.RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS + 1)
+        UploadSession.objects.filter(pk=stuck.pk).update(modified=expired)
+        old = session_for(make_video(100))
+        retention = timedelta(days=settings.RESUMABLE_UPLOAD_RETENTION_DAYS + 1)
+        UploadSession.objects.filter(pk=old.pk).update(
+            status=UploadSession.UploadStatus.CANCELLED, modified=timezone.now() - retention
+        )
+
+        with patch('events.v1.uploads.open', create=True, side_effect=PermissionError(errno.EACCES, 'denied')), \
+                patch('events.v1.uploads.current_app.send_task'), caplog.at_level('ERROR', logger='asp_api'):
+            summary = cleanup_sessions()
+
+        stuck.refresh_from_db()
+        assert summary['finalizations_failed'] == 0
+        assert summary['purged'] == 1
+        assert stuck.status == UploadSession.UploadStatus.FINALIZING
+        assert part_path(stuck.id).exists()
+        assert not UploadSession.objects.filter(pk=old.pk).exists()
+        assert f'upload_stuck_claim_failed session={stuck.id}' in caplog.text
+
     def test_management_command_reports_summary(self, capsys):
         """ The command is a thin wrapper that prints the cleanup summary """
         call_command('cleanup_upload_sessions')
@@ -547,5 +594,23 @@ class TestFinalizationHoldsNoTransaction:
                 result = finalize_session(session.id)
 
         assert seen == {'in_transaction': False, 'row_lock_free': True}
+        assert result.status == UploadSession.UploadStatus.COMPLETED
+        assert VideoAsset.objects.filter(pk=result.video_asset_id).exists()
+
+    def test_connection_is_closed_during_conversion(self, staff_client, session_for):
+        """ The idle DB connection is released for the hours-long conversion and reopened to settle the outcome """
+        session = TestFinalizationFileCleanup.finished_session(staff_client, session_for, make_video(500))
+        convert = uploads.make_web_playable
+        seen = {}
+
+        def observe_connection(source, destination):
+            seen['connection_closed'] = connection.connection is None
+            convert(source, destination)
+
+        with patch('events.v1.uploads.make_web_playable', observe_connection):
+            with patch('events.models.ffmpeg', fake_ffmpeg(90)):
+                result = finalize_session(session.id)
+
+        assert seen == {'connection_closed': True}
         assert result.status == UploadSession.UploadStatus.COMPLETED
         assert VideoAsset.objects.filter(pk=result.video_asset_id).exists()
