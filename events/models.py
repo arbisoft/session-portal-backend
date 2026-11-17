@@ -46,6 +46,18 @@ def validate_video_filename(name: str) -> None:
 
 User = get_user_model()
 
+
+def unguessable_upload_name(_instance, filename: str) -> str:
+    """
+    ``upload_to`` for video and thumbnail files: a random UUID plus the original extension.
+
+    The client-supplied name is not used for files saved through the field, so a file URL cannot be guessed from a
+    title, a sequential name or a sibling file (a thumbnail no longer shares its video's name). Resumable uploads
+    bypass ``upload_to``: they are stored under their session UUID (``<session id>.mp4``).
+    """
+    return f"{uuid.uuid4().hex}{os.path.splitext(filename)[1].lower()}"
+
+
 VIDEOS_DIR = 'videos'
 THUMBNAILS_DIR = 'thumbnails'
 CAPTIONS_DIR = 'captions'
@@ -153,12 +165,15 @@ class VideoAsset(models.Model):
     title = models.CharField(max_length=255)
     video_file = models.FileField(
         storage=video_storage,
+        upload_to=unguessable_upload_name,
         null=True,
         blank=True,
         validators=[validate_video_extension],
     )
     duration = models.IntegerField(default=0)  # in seconds
-    thumbnail = models.ImageField(storage=thumbnail_storage, null=True, blank=True)
+    thumbnail = models.ImageField(
+        storage=thumbnail_storage, upload_to=unguessable_upload_name, null=True, blank=True
+    )
     status = models.CharField(max_length=20, choices=VideoStatus.choices)
     captions_file = models.FileField(
         storage=captions_storage,
@@ -184,8 +199,8 @@ class VideoAsset(models.Model):
                 self.duration = int(duration)  # Convert to seconds
 
                 if not self.thumbnail:
-                    thumbnail_filename = f"{os.path.splitext(os.path.basename(video_path))[0]}_thumb.jpg"
-                    thumbnail_path = os.path.join(os.path.dirname(video_path), thumbnail_filename)
+                    thumbnail_tmp_name = f"{os.path.splitext(os.path.basename(video_path))[0]}_thumb.jpg"
+                    thumbnail_path = os.path.join(os.path.dirname(video_path), thumbnail_tmp_name)
 
                     # Take a frame at 20% of the video duration for the thumbnail
                     time_offset = max(1, int(self.duration * 0.2))
@@ -201,7 +216,7 @@ class VideoAsset(models.Model):
 
                     # Save the thumbnail to the model
                     with open(thumbnail_path, 'rb') as thumb_file:
-                        self.thumbnail.save(thumbnail_filename, File(thumb_file), save=False)
+                        self.thumbnail.save(thumbnail_tmp_name, File(thumb_file), save=False)
 
                     # Clean up the temporary file
                     os.remove(thumbnail_path)

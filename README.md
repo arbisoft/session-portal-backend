@@ -341,11 +341,13 @@ $ python manage.py check_videoasset_status [ASSET_ID ...] [--all] [--recent HOUR
 $ python manage.py prepopulate_events CSV_FILE [--dry-run] [--skip-video-download] [--creator USERNAME]
 $ python manage.py cleanup_upload_sessions
 $ python manage.py convert_videoassets [ASSET_ID ...] [--dry-run]
+$ python manage.py rename_media_files [ASSET_ID ...] [--dry-run]
 ```
 
 - `check_videoasset_status` prints the status of video assets. Pass asset IDs, `--all`, or `--recent HOURS`; `--processing` narrows the output to processing and failed assets.
 - `cleanup_upload_sessions` expires abandoned resumable uploads and deletes their leftovers. Celery beat runs it hourly; see [UPLOADS.md](UPLOADS.md).
 - `convert_videoassets` converts stored videos that are not H.264/AAC MP4 files (AVI, WebM, ProRes, HEVC...) into ones that play. Pass asset IDs to limit it, or `--dry-run` to list what would be converted. Run one instance at a time; see [UPLOADS.md](UPLOADS.md).
+- `rename_media_files` gives videos and thumbnails stored under guessable names (`video_280.mp4`, `All_Hands_2026.mov`) random UUID names and updates their rows; new uploads already get UUID names (`events.models.unguessable_upload_name`). It is a command, not a data migration, because it renames files on disk and the old URLs stop working, so run it once after deploying, with `--dry-run` first. Re-run it after `convert_videoassets`, which keeps the original file name, and do not run the two at the same time. The web server must also refuse `/media/videos/` (Django only serves `thumbnails/` and `captions/`, and only in debug).
 - `prepopulate_events` imports events from a CSV with the columns `Title`, `Details`, `Trainer`, `Publish Date`, `Link`, `Playlist`, and `Tags`. It queues the Google Drive downloads on Celery, so Redis and a worker must be running unless you pass `--skip-video-download`. Use `--dry-run` first.
 
 ## CI and deployment

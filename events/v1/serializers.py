@@ -164,7 +164,8 @@ class PlaylistListSerializer(serializers.ModelSerializer):
 
 class VideoAssetCreateSerializer(serializers.ModelSerializer):
     """ Serializer for creating a VideoAsset via file upload """
-    video_file = serializers.FileField(required=True, validators=[validate_video_extension])
+    # Write-only: the response must not carry the file's /media/ URL. Playback goes through the authenticated stream.
+    video_file = serializers.FileField(required=True, write_only=True, validators=[validate_video_extension])
 
     class Meta:
         model = VideoAsset

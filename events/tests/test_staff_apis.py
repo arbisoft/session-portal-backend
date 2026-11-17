@@ -1,3 +1,4 @@
+import re
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
@@ -171,6 +172,16 @@ class TestVideoAssetCreateAPI:
     def upload():
         """ Build a multipart payload with a small mp4 file """
         return {'video_file': SimpleUploadedFile('session.mp4', b'fake video content', content_type='video/mp4')}
+
+    @pytest.mark.usefixtures('media_storage')
+    def test_response_does_not_expose_the_media_url(self, staff_client):
+        """ The stored file's /media/ URL is never returned, playback goes through the authenticated stream """
+        with patch('events.models.ffmpeg', fake_ffmpeg(duration=10)):
+            response = staff_client.post(reverse('video-asset-create'), self.upload(), format='multipart')
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert 'video_file' not in response.data
+        assert '/media/' not in str(response.data)
 
     def test_anonymous_cannot_upload(self):
         """ Test that unauthenticated requests are rejected """
@@ -504,7 +515,7 @@ class TestEventCreateAPI:
         video_asset.refresh_from_db()
         assert video_asset.event_id == response.data['id']
         assert video_asset.duration == 90
-        assert video_asset.thumbnail.name.startswith('cover')
+        assert re.fullmatch(r'[0-9a-f]{32}\.png', video_asset.thumbnail.name)
         assert video_asset.thumbnail.storage.exists(video_asset.thumbnail.name)
 
     def test_uploaded_thumbnail_waits_for_commit(
