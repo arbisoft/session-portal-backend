@@ -31,7 +31,7 @@ from rest_framework.exceptions import APIException
 
 from django.conf import settings
 from django.db import IntegrityError, OperationalError, connection, transaction
-from django.db.models import F, Sum
+from django.db.models import F, QuerySet, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -185,8 +185,18 @@ def get_session(session_id: UUID, owner) -> UploadSession:
     return get_object_or_404(UploadSession, pk=session_id, owner=owner)
 
 
+def _live_uploading() -> QuerySet:
+    """ Sessions that still accept bytes: ``UPLOADING`` and not past their expiry """
+    return UploadSession.objects.filter(status=UploadSession.UploadStatus.UPLOADING, expires_at__gt=timezone.now())
+
+
+def unfinished_sessions(owner) -> QuerySet:
+    """ The owner's uploads that still accept bytes, newest first """
+    return _live_uploading().filter(owner=owner).order_by("-created")
+
+
 def _assert_capacity(owner, file_size: int) -> None:
-    uploading = UploadSession.objects.filter(status=UploadSession.UploadStatus.UPLOADING)
+    uploading = _live_uploading()
     if uploading.filter(owner=owner).count() >= settings.RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER:
         raise UploadAPIError(
             "too_many_active_uploads",

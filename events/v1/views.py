@@ -42,6 +42,7 @@ from events.v1.uploads import (
     create_session,
     get_session,
     retry_finalization,
+    unfinished_sessions,
 )
 from events.v1.utils import event_videos, get_similar_events
 from users.permissions import IsStaffPermission
@@ -184,19 +185,30 @@ class VideoAssetCreateView(CreateAPIView):
     View for uploading a new video asset (staff only).
 
     A multipart body uploads the whole file in one request. A JSON body starts a resumable upload session instead, whose
-    chunks are then sent to ``videoassets/<session id>/``.
+    chunks are then sent to ``videoassets/<session id>/``. GET lists the caller's unfinished resumable sessions.
     """
 
     permission_classes = [IsAuthenticated, IsStaffPermission]
     serializer_class = VideoAssetCreateSerializer
     parser_classes = [MultiPartParser, JSONParser]
-    throttle_scope = 'upload_create'
+    pagination_class = None
+    throttle_scopes = {'GET': 'upload_status', 'POST': 'upload_create'}
+
+    @property
+    def throttle_scope(self):
+        """ Scope read by ``ScopedRateThrottle`` for the current HTTP method """
+        return self.throttle_scopes.get(self.request.method)
 
     def get_throttles(self):
-        """ Only the JSON branch that opens a resumable session is throttled """
-        if media_type(self.request) == 'application/json':
+        """ Only listing and the JSON branch that opens a resumable session are throttled """
+        if self.request.method == 'GET' or media_type(self.request) == 'application/json':
             return [ScopedRateThrottle()]
         return super().get_throttles()
+
+    @extend_schema(responses={200: UploadSessionSerializer(many=True)})
+    def get(self, request, *args, **kwargs):
+        """ The caller's unfinished resumable uploads (``UPLOADING``, not expired), newest first """
+        return Response(UploadSessionSerializer(unfinished_sessions(request.user), many=True).data)
 
     @extend_schema(
         request={'multipart/form-data': VideoAssetCreateSerializer, 'application/json': UploadSessionCreateSerializer},

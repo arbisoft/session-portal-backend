@@ -9,7 +9,8 @@ from rest_framework.test import APIClient
 from rest_framework.throttling import ScopedRateThrottle
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client
+from django.db import connection
+from django.test import Client, utils
 from django.urls import reverse
 from django.utils import timezone
 
@@ -281,3 +282,103 @@ class TestUploadSessionAdmin:
         response = client.get(reverse('admin:events_uploadsession_changelist'))
 
         assert response.status_code == status.HTTP_302_FOUND
+
+
+@pytest.mark.django_db
+@pytest.mark.usefixtures('upload_root')
+class TestUnfinishedUploadList:
+    """ GET on the create endpoint lists the caller's uploads that can still be continued or deleted """
+
+    url = reverse('video-asset-create')
+
+    def test_lists_only_own_live_sessions_newest_first(self, staff_client, other_staff_client):
+        """ Other users' sessions, closed sessions and lapsed sessions are not listed """
+        first = start_upload(staff_client, make_video(100)).data['id']
+        second = start_upload(staff_client, make_video(200)).data['id']
+        start_upload(other_staff_client, make_video(100))
+        cancelled = start_upload(staff_client, make_video(300)).data['id']
+        cancel_upload(staff_client, cancelled)
+        lapsed = start_upload(staff_client, make_video(400)).data['id']
+        UploadSession.objects.filter(pk=lapsed).update(expires_at=timezone.now() - timedelta(minutes=1))
+
+        response = staff_client.get(self.url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [item['id'] for item in response.data] == [second, first]
+        assert response.data[0]['upload_status'] == 'UPLOADING'
+        assert response.data[0]['file_size'] == 200
+
+    def test_reports_confirmed_offset(self, staff_client):
+        """ The listed offset is the position the upload continues from """
+        session_id = start_upload(staff_client, make_video(100)).data['id']
+        chunk_upload(staff_client, session_id)
+
+        response = staff_client.get(self.url)
+
+        assert response.data[0]['offset'] == 50
+
+    def test_requires_staff(self, user_client):
+        """ Regular users cannot list uploads """
+        assert user_client.get(self.url).status_code == status.HTTP_403_FORBIDDEN
+
+    def test_requires_authentication(self):
+        """ Anonymous callers are rejected """
+        assert APIClient().get(self.url).status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_listing_is_throttled_with_the_status_scope(self, staff_client):
+        """ Listing uses the cheap status scope, not the creation scope """
+        with patch.object(ScopedRateThrottle, 'THROTTLE_RATES', {'upload_status': '1/min', 'upload_create': '100/min'}):
+            first = staff_client.get(self.url)
+            second = staff_client.get(self.url)
+
+        assert first.status_code == status.HTTP_200_OK
+        assert second.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+    def test_deleting_a_listed_upload_frees_its_slot(self, staff_client, settings):
+        """ A stuck upload can be removed through the list, after which a new one can start """
+        settings.RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER = 1
+        stuck = start_upload(staff_client, make_video(100)).data['id']
+        assert start_upload(staff_client, make_video(100)).status_code == status.HTTP_409_CONFLICT
+
+        assert cancel_upload(staff_client, stuck).status_code == status.HTTP_204_NO_CONTENT
+
+        assert staff_client.get(self.url).data == []
+        assert start_upload(staff_client, make_video(100)).status_code == status.HTTP_201_CREATED
+
+    def test_lapsed_upload_does_not_hold_a_slot(self, staff_client, settings):
+        """ An upload past its expiry cannot be continued, so it must not block a new one before the sweep runs """
+        settings.RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER = 1
+        stale = start_upload(staff_client, make_video(100)).data['id']
+        UploadSession.objects.filter(pk=stale).update(expires_at=timezone.now() - timedelta(minutes=1))
+
+        assert start_upload(staff_client, make_video(100)).status_code == status.HTTP_201_CREATED
+
+    def test_lapsed_upload_releases_reserved_space(self, staff_client, other_staff_client):
+        """ A lapsed session's unsent bytes stop counting against free space before the sweep runs """
+        stale = start_upload(staff_client, make_video(1000)).data['id']
+
+        with patch('events.v1.uploads.shutil.disk_usage') as disk_usage:
+            disk_usage.return_value.free = 1500
+            refused = start_upload(other_staff_client, make_video(600))
+            UploadSession.objects.filter(pk=stale).update(expires_at=timezone.now() - timedelta(minutes=1))
+            accepted = start_upload(other_staff_client, make_video(600))
+
+        assert refused.status_code == status.HTTP_507_INSUFFICIENT_STORAGE
+        assert refused.data['code'] == 'insufficient_storage'
+        assert accepted.status_code == status.HTTP_201_CREATED
+
+    def test_query_count_does_not_grow_with_sessions(self, staff_client, settings):
+        """ Listing runs the same queries for one session as for several, so no field adds a per-row query """
+        settings.RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER = 10
+        start_upload(staff_client, make_video(100))
+        staff_client.get(self.url)
+        with utils.CaptureQueriesContext(connection) as one_session:
+            staff_client.get(self.url)
+        for _ in range(3):
+            start_upload(staff_client, make_video(100))
+
+        with utils.CaptureQueriesContext(connection) as four_sessions:
+            response = staff_client.get(self.url)
+
+        assert len(response.data) == 4
+        assert len(four_sessions) == len(one_session)
