@@ -9,7 +9,7 @@ paths:
 
 ## Layout
 
-- Each app exposes a versioned API under `<app>/v1/` (`serializers.py`, `views.py`, `urls.py`; `events` also has `filters.py`, `pagination.py`, `utils.py`, `uploads.py`, `streaming.py`).
+- Each app exposes a versioned API under `<app>/v1/` (`serializers.py`, `views.py`, `urls.py`; `events` also has `filters.py`, `pagination.py`, `utils.py`, `uploads.py`, `streaming.py`, `transcoding.py`).
 - A new API version is a sibling package (`v2/`), never an edit that changes the contract of `v1`.
 - Shared permission classes live in `users/permissions.py` (`IsStaffPermission`), including for `events` endpoints.
 
@@ -29,7 +29,7 @@ paths:
 
 - `select_related()` for ForeignKey / OneToOne, `prefetch_related()` for M2M / reverse FK. Check serializers and properties, not just the view.
 - No N+1 — `SerializerMethodField`s and model properties must use prefetched data (`.all()`, not `.filter()`). See the `django-query-optimisation` skill.
-- Event list/detail endpoints traverse `creator`, `tags`, `playlists`, `presenters`, and the reverse `videos` relation; any new field on them needs matching `select_related`/`prefetch_related`. `Event.objects.with_card_data()` (`EventQuerySet` in `events/models.py`) owns that prefetch set: build every queryset that feeds `EventSerializer` from it and extend it when a serializer field is added. `.first()` and `.filter()` on a related manager bypass the prefetch cache; read the prefetched `.all()` instead (precedent: `Event.first_video`, `Event.playable_video`).
+- Event list/detail endpoints traverse `creator`, `tags`, `playlists`, `presenters`, and the reverse `videos` relation; any new field on them needs matching `select_related`/`prefetch_related`. `Event.objects.with_card_data()` (`EventQuerySet` in `events/models.py`) owns that prefetch set: build every queryset that feeds `EventSerializer` from it and extend it when a serializer field is added. `.first()` and `.filter()` on a related manager bypass the prefetch cache; read the prefetched `.all()` instead (precedent: `Event.playable_video`).
 - `bulk_create()` / `bulk_update()` for batches — never loop-save.
 - `.only()` / `.defer()` or `values()` on hot paths when full rows are not needed (see `VideoAssetIncrementViewCountView`).
 - `QuerySet.update()` when touching columns on a `VideoAsset` without needing ffmpeg: `VideoAsset.save()` runs ffmpeg whenever `video_file` is set.
@@ -51,12 +51,13 @@ paths:
 - `Event` foreign keys use `on_delete=DO_NOTHING` and `EventAdmin` disables deletion — keep new relations consistent with that choice and say why if they differ.
 - Event slugs are assigned by the `post_save` signal in `events/signals.py`. Do not set them elsewhere.
 - File fields use the module-level storages in `events/models.py`; don't instantiate storages in views or serializers.
+- Stored names of video and thumbnail files come from the server, never the client filename: set `upload_to=unguessable_upload_name` (`events/models.py`, used by `VideoAsset.video_file` and `thumbnail`) on any new media field that serves private content. `captions_file` is the one field without it.
 
 ## Migrations
 
 - Any model, field, constraint, or relation change ships with its migration in the same PR.
 - Tests run with migrations disabled (`DisableMigrations`), so a green suite does not prove a migration works. Follow the `django-migration-standards` skill.
-- Data backfills use a data migration, not an ad-hoc script. Keep schema and data in separate files.
+- Data backfills use a data migration, not an ad-hoc script. Keep schema and data in separate files. Exception: a backfill that moves or converts files on disk (or runs for hours) is a resumable, idempotent management command with `--dry-run`, because a migration cannot roll files back with the transaction (precedents: `convert_videoassets`, `rename_media_files`). Pair it with the schema migration and document it in the README or `UPLOADS.md`.
 - Watch for: NOT NULL without default on populated tables, irreversible `RunPython`, rename-and-use in one PR, new Postgres extensions (the test DB creates `pg_trgm` in `conftest.py`, not through migrations).
 - Migrations must stay backwards-compatible with the code currently deployed (PR template requirement).
 
@@ -66,5 +67,6 @@ paths:
 - Dispatch from inside a transaction with `transaction.on_commit(partial(task.delay, ...))` so the worker never sees uncommitted rows (precedent: `events/v1/uploads.py`).
 - Retry transient failures declaratively with `autoretry_for=(...)`, `retry_backoff=True`, `retry_backoff_max`, `max_retries` (precedent: `finalize_upload_session`); do not hand-roll retry loops.
 - Guard state transitions with `select_for_update()` inside `transaction.atomic()`; use `nowait=True` for request paths and `skip_locked=True` for sweepers (precedent: `events/v1/uploads.py`).
+- Unbounded external work (an hours-long ffmpeg conversion, downloads) must not run inside a transaction or under a row lock: claim it outside the database (precedent: `_finalization_claim`, an `flock` on the partial file), then take a plain `select_for_update()`, re-check the state and record the result in a short transaction (`_settle_finalization`). Bounded I/O under the lock is fine where the lock is the serialization point (`append_chunk`).
 - Use `logging`, not `print()`.
 - Pass IDs to tasks, not model instances.

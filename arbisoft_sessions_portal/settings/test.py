@@ -20,6 +20,8 @@ SENTRY_DSN = None
 AUTH_PASSWORD_VALIDATORS = []
 
 CELERY_BROKER_URL = 'memory://'
+# send_task() subscribes to the result backend, so a Redis one needs a reachable server (CI has none).
+CELERY_RESULT_BACKEND = 'cache+memory://'
 
 CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
 

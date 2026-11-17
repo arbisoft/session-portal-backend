@@ -4,6 +4,7 @@ import hashlib
 import threading
 from datetime import timedelta
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,10 +17,12 @@ from django.db import DatabaseError, connection, transaction
 from django.urls import reverse
 from django.utils import timezone
 
+from events.factories import EventFactory
 from events.models import UploadSession, VideoAsset
 from events.tasks import finalize_upload_session
 from events.tests.test_staff_apis import fake_ffmpeg
 from events.v1 import uploads
+from events.v1.serializers import UploadSessionSerializer
 from events.v1.uploads import (
     CHUNK_CONTENT_TYPE,
     ChunkRequest,
@@ -124,6 +127,28 @@ class TestUploadSessionCreation:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert 'filename' in response.data
+
+    def test_exe_rejected_with_allowed_formats(self, staff_client):
+        """ The filename error names the extension and lists the allowed formats """
+        response = start_upload(staff_client, b'x' * 10, filename='malware.exe')
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert [str(error) for error in response.data['filename']] == [
+            "Unsupported file type '.exe'. Allowed formats: avi, mov, mp4, webm."
+        ]
+        assert not UploadSession.objects.exists()
+
+    def test_serializer_chunk_limits_follow_settings(self, session_for, settings):
+        """ chunk_size and max_chunk_size are read from settings on every serialization, not stored on the session """
+        session = session_for(make_video(100))
+        settings.RESUMABLE_UPLOAD_CHUNK_BYTES = 123
+        settings.RESUMABLE_UPLOAD_MAX_CHUNK_BYTES = 456
+
+        data = UploadSessionSerializer(session).data
+
+        assert data['chunk_size'] == 123
+        assert data['max_chunk_size'] == 456
+        assert data['offset'] == 0
 
     def test_oversized_file_is_rejected(self, staff_client, settings):
         """ The declared size is checked against the configured limit up front """
@@ -629,6 +654,87 @@ class TestUploadStatusAndCancel:
 
 
 @pytest.mark.django_db
+class TestRemoveCompletedUpload:
+    """ Remove video after "Upload complete": DELETE on a completed session discards the unused asset """
+
+    @pytest.fixture(autouse=True)
+    def storage(self, media_storage, upload_root):  # pylint: disable=unused-argument
+        """ Keep promoted videos and partial files in temporary directories """
+
+    def completed_session(self, staff_client, session_for, data):
+        """ A session whose bytes were all uploaded and whose file was finalized into an asset """
+        session = session_for(data)
+        upload_in_chunks(staff_client, session.id, data, 128)
+        with patch('events.models.ffmpeg', fake_ffmpeg(90)):
+            finalize_session(session.id)
+        session.refresh_from_db()
+        return session
+
+    def test_removing_completed_upload_deletes_asset(
+        self, staff_client, session_for, media_storage, django_capture_on_commit_callbacks
+    ):
+        """ Remove video after "Upload complete" must not leave an unused asset and video behind """
+        session = self.completed_session(staff_client, session_for, make_video(500))
+        video = media_storage / 'video_file' / f'{session.id}.mp4'
+        assert video.exists()
+
+        with django_capture_on_commit_callbacks(execute=True):
+            response = staff_client.delete(reverse('upload-session-detail', args=[session.id]))
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        session.refresh_from_db()
+        assert session.status == UploadSession.UploadStatus.CANCELLED
+        assert session.video_asset_id is None
+        assert not VideoAsset.objects.exists()
+        assert not video.exists()
+
+    def test_legacy_named_video_is_removed(
+        self, staff_client, session_for, media_storage, django_capture_on_commit_callbacks
+    ):
+        """ The asset's own files go, even when the video is not called after the session id """
+        session = self.completed_session(staff_client, session_for, make_video(500))
+        asset = VideoAsset.objects.get(pk=session.video_asset_id)
+        thumbnail = Path(asset.thumbnail.path)
+        legacy = media_storage / 'video_file' / f'{session.id}.avi'
+        (media_storage / 'video_file' / f'{session.id}.mp4').rename(legacy)
+        VideoAsset.objects.filter(pk=asset.pk).update(video_file=legacy.name)
+        assert legacy.exists()
+        assert thumbnail.exists()
+
+        with django_capture_on_commit_callbacks(execute=True):
+            response = staff_client.delete(reverse('upload-session-detail', args=[session.id]))
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        session.refresh_from_db()
+        assert session.status == UploadSession.UploadStatus.CANCELLED
+        assert not VideoAsset.objects.exists()
+        assert not legacy.exists()
+        assert not thumbnail.exists()
+
+    def test_removing_a_completed_upload_twice_is_harmless(self, staff_client, session_for):
+        """ DELETE stays idempotent once the asset is gone """
+        session = self.completed_session(staff_client, session_for, make_video(500))
+        url = reverse('upload-session-detail', args=[session.id])
+
+        assert staff_client.delete(url).status_code == status.HTTP_204_NO_CONTENT
+        assert staff_client.delete(url).status_code == status.HTTP_204_NO_CONTENT
+
+    def test_a_video_used_by_an_event_cannot_be_removed(self, staff_client, session_for, media_storage):
+        """ Once published, the asset belongs to the event and the upload endpoint must not delete it """
+        session = self.completed_session(staff_client, session_for, make_video(500))
+        VideoAsset.objects.filter(pk=session.video_asset_id).update(event=EventFactory())
+
+        response = staff_client.delete(reverse('upload-session-detail', args=[session.id]))
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert response.data['code'] == 'video_in_use'
+        session.refresh_from_db()
+        assert session.status == UploadSession.UploadStatus.COMPLETED
+        assert VideoAsset.objects.filter(pk=session.video_asset_id).exists()
+        assert (media_storage / 'video_file' / f'{session.id}.mp4').exists()
+
+
+@pytest.mark.django_db
 class TestUploadFinalization:
     """ Promotion of a fully uploaded file to a VideoAsset """
 
@@ -717,13 +823,14 @@ class TestUploadFinalization:
         assert result.error_code == 'size_mismatch'
         assert f'upload_file_missing session={session.id}' in caplog.text
 
-    def test_whole_file_checksum_is_verified(self, staff_client, session_for):
+    def test_whole_file_checksum_is_verified(self, staff_client, session_for, django_capture_on_commit_callbacks):
         """ A mismatching whole-file checksum fails the session """
         session = self.finished_session(
             staff_client, session_for, make_video(500), checksum_sha256=hashlib.sha256(b'other').hexdigest()
         )
 
-        result = finalize_session(session.id)
+        with django_capture_on_commit_callbacks(execute=True):
+            result = finalize_session(session.id)
 
         assert result.status == UploadSession.UploadStatus.FAILED
         assert result.error_code == 'checksum_mismatch'
@@ -741,16 +848,21 @@ class TestUploadFinalization:
 
         assert result.status == UploadSession.UploadStatus.COMPLETED
 
-    def test_unprocessable_video_fails_session(self, staff_client, session_for):
-        """ When ffmpeg finds no duration the asset is FAILED and the session reports it """
+    def test_unprocessable_video_is_discarded(
+        self, staff_client, session_for, media_storage, django_capture_on_commit_callbacks
+    ):
+        """ When ffmpeg finds no duration the session fails and neither the asset row nor its files are kept """
         session = self.finished_session(staff_client, session_for, make_video(500))
 
-        with patch('events.models.ffmpeg', fake_ffmpeg(0)):
+        with patch('events.models.ffmpeg', fake_ffmpeg(0)), django_capture_on_commit_callbacks(execute=True):
             result = finalize_session(session.id)
 
         assert result.status == UploadSession.UploadStatus.FAILED
         assert result.error_code == 'processing_failed'
-        assert VideoAsset.objects.get().status == VideoAsset.VideoStatus.FAILED
+        assert result.video_asset_id is None
+        assert not VideoAsset.objects.exists()
+        assert not (media_storage / 'video_file' / f'{session.id}.mp4').exists()
+        assert not list((media_storage / 'thumbnail').glob('*'))
 
     def test_finalize_ignores_sessions_still_uploading(self, session_for):
         """ Finalization only acts on sessions whose bytes are all in """

@@ -21,7 +21,7 @@ CI runs `tox -e quality`: `pylint events users`, `pycodestyle events users`, `is
 - Respect `pylintrc` (the source of truth): `max-args = 5`, `max-locals = 15`, `max-branches = 12`, `max-returns = 6`, `max-statements = 50`, `max-attributes = 7`, `min-public-methods = 2`.
 - `min-similarity-lines = 4`: duplicated blocks across files trip `duplicate-code`. Extract a helper; tests that legitimately repeat setup have precedent for a file-level disable.
 - Import order is isort with a separate Django block: `FUTURE, STDLIB, THIRDPARTY, DJANGO, FIRSTPARTY, LOCALFOLDER`. Fix with `tox -e isort`.
-- Migrations are excluded from lint.
+- Migrations and `management/` commands are excluded from lint (`pylintrc` `ignore`), so review them by hand: error paths, rollbacks, broad `except`.
 
 ## Comments and Lint Disables
 

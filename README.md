@@ -48,7 +48,7 @@ Setup guide to set up the project from scratch.
 | ------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | Python 3.12               | Everything                                                                                                     |
 | PostgreSQL 16             | Everything. SQLite does not work: search uses `django.contrib.postgres` trigram similarity                     |
-| ffmpeg                    | Every video upload. `VideoAsset.save()` runs ffmpeg synchronously to read the duration and extract a thumbnail |
+| ffmpeg                    | Every video upload. `VideoAsset.save()` runs ffmpeg synchronously to read the duration and extract a thumbnail; resumable finalization also converts the video to MP4 (CPU heavy, can take hours) |
 | Redis and a Celery worker | Google Drive video imports and finalizing resumable uploads. The single-request upload does not need them     |
 | Docker and docker-compose | Option 2 only                                                                                                  |
 
@@ -72,9 +72,11 @@ DJANGO_DEBUG=<django debug flag>
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | `settings/local.py` (copied from `local.example.py`), `settings/test.py`, and `docker-compose.yml` | `settings/base.py` hardcodes an empty database user, so the server needs `local.py` to connect. Use `DB_HOST=localhost` for Option 1 and `DB_HOST=db` for Option 2. `docker-compose.yml` uses only `DB_USER`, `DB_PASSWORD` and `DB_NAME`. `settings/test.py` falls back to `testdb` / `testuser` / `testpassword` / `localhost` / `5432` when a variable is unset |
 | `DJANGO_SECRET_KEY`                                       | `settings/base.py`                                                                                 | No default. Tests use their own key                                                                                                                                                                                                                                                                                                                                |
-| `DJANGO_DEBUG`                                            | `settings/base.py`                                                                                 | Any non-empty value, including `False`, turns debug on. Leave it unset to turn it off. `ALLOWED_HOSTS` is empty, so `runserver` refuses to start with debug off: set it for local development. Debug also serves `/media/` files                                                                                                                                   |
+| `DJANGO_DEBUG`                                            | `settings/base.py`                                                                                 | Any non-empty value, including `False`, turns debug on. Leave it unset to turn it off. `ALLOWED_HOSTS` is empty, so `runserver` refuses to start with debug off: set it for local development. Debug also serves `/media/thumbnails/` and `/media/captions/` (never videos: those are streamed by the authenticated `/api/v1/events/videoasset/<slug>/stream/` endpoint)                                                                                                                                   |
 | `DJANGO_PORT`                                             | `docker-compose.yml` only                                                                          | Port that `runserver` binds and that the `django` container publishes. With Option 1, `runserver` uses its own default (8000)                                                                                                                                                                                                                                      |
 | `RESUMABLE_UPLOAD_*` | `settings/base.py` | Optional limits and locations for resumable uploads (file size, chunk size, session TTL, partial-file directory). Defaults and meaning are in the Settings table of [UPLOADS.md](UPLOADS.md) |
+| `VIDEO_TRANSCODE_TIMEOUT_SECONDS` | `settings/base.py` | Longest one video conversion may run, in seconds. Defaults to 18000 (5 h). Keep it below `RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS` |
+| `CAPTIONS_MAX_FILE_BYTES` | `settings/base.py` | Largest caption file (`.vtt` or `.srt`) the admin accepts. Defaults to 2 MiB |
 | `REDIS_CACHE_URL` | `settings/base.py` | Redis URL of the Django cache that holds the upload throttle counters. Defaults to `redis://redis:6379/1`. See [Redis and Celery](#redis-and-celery) |
 | `SENTRY_DSN` | `settings/base.py` | Sentry error reporting is off when this is unset. Initialised by `arbisoft_sessions_portal/sentry.py` when the project package is imported (web, Celery worker and beat, `manage.py`), from the final `settings.SENTRY_DSN`, so `settings/local.py` can override it and `settings/test.py` sets it to `None` (tests never create a client) |
 | `SENTRY_ENVIRONMENT` | `settings/base.py` | Optional environment name shown in Sentry (for example `production`) |
@@ -320,6 +322,8 @@ The API reference is generated from the code (drf-spectacular). With the server 
 
 Endpoints live under `/api/v1/users/` and `/api/v1/events/`. Large-file uploads use the resumable endpoints under `/api/v1/events/videoassets/`, documented in [UPLOADS.md](UPLOADS.md). Every endpoint requires a JSON Web Token (JWT) or a session login except the two login endpoints; staff-only endpoints also require `is_staff`.
 
+Video bytes are never served from `/media/`. The `video_file` field in event and video asset responses is the path of `GET /api/v1/events/videoasset/<slug>/stream/`, which requires the same authentication and supports HTTP `Range` requests for seeking.
+
 ## Django admin
 
 Create a superuser, then sign in at `/admin/`:
@@ -336,10 +340,14 @@ Staff access to the upload and event-creation endpoints is controlled by a user'
 $ python manage.py check_videoasset_status [ASSET_ID ...] [--all] [--recent HOURS] [--processing]
 $ python manage.py prepopulate_events CSV_FILE [--dry-run] [--skip-video-download] [--creator USERNAME]
 $ python manage.py cleanup_upload_sessions
+$ python manage.py convert_videoassets [ASSET_ID ...] [--dry-run]
+$ python manage.py rename_media_files [ASSET_ID ...] [--dry-run]
 ```
 
 - `check_videoasset_status` prints the status of video assets. Pass asset IDs, `--all`, or `--recent HOURS`; `--processing` narrows the output to processing and failed assets.
 - `cleanup_upload_sessions` expires abandoned resumable uploads and deletes their leftovers. Celery beat runs it hourly; see [UPLOADS.md](UPLOADS.md).
+- `convert_videoassets` converts stored videos that are not H.264/AAC MP4 files (AVI, WebM, ProRes, HEVC...) into ones that play. Pass asset IDs to limit it, or `--dry-run` to list what would be converted. Run one instance at a time; see [UPLOADS.md](UPLOADS.md).
+- `rename_media_files` gives videos and thumbnails stored under guessable names (`video_280.mp4`, `All_Hands_2026.mov`) random UUID names and updates their rows; new uploads already get UUID names (`events.models.unguessable_upload_name`). It is a command, not a data migration, because it renames files on disk and the old URLs stop working, so run it once after deploying, with `--dry-run` first. Re-run it after `convert_videoassets`, which keeps the original file name, and do not run the two at the same time. The web server must also refuse `/media/videos/` (Django only serves `thumbnails/` and `captions/`, and only in debug).
 - `prepopulate_events` imports events from a CSV with the columns `Title`, `Details`, `Trainer`, `Publish Date`, `Link`, `Playlist`, and `Tags`. It queues the Google Drive downloads on Celery, so Redis and a worker must be running unless you pass `--skip-video-download`. Use `--dry-run` first.
 
 ## CI and deployment

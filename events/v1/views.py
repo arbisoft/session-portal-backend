@@ -1,6 +1,13 @@
 from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import OpenApiParameter, PolymorphicProxySerializer, extend_schema, extend_schema_view
-from rest_framework import status
+from drf_spectacular.utils import (
+    OpenApiParameter,
+    OpenApiResponse,
+    PolymorphicProxySerializer,
+    extend_schema,
+    extend_schema_view,
+    inline_serializer,
+)
+from rest_framework import serializers, status
 from rest_framework.generics import CreateAPIView, ListAPIView, ListCreateAPIView, RetrieveAPIView
 from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -8,8 +15,8 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from django.db.models import F, Max
-from django.shortcuts import get_object_or_404
+from django.db.models import Exists, F, Max, OuterRef, Prefetch
+from django.http import Http404
 
 from events.models import Event, Playlist, Tag, VideoAsset
 from events.v1.filters import EventFilter, PlaylistFilter, TagFilter
@@ -25,6 +32,7 @@ from events.v1.serializers import (
     VideoAssetCreateSerializer,
     VideoAssetSerializer,
 )
+from events.v1.streaming import IgnoreClientContentNegotiation, stream_file_field
 from events.v1.uploads import (
     CHUNK_CONTENT_TYPE,
     ChunkRequest,
@@ -34,15 +42,30 @@ from events.v1.uploads import (
     create_session,
     get_session,
     retry_finalization,
+    unfinished_sessions,
 )
-from events.v1.utils import get_similar_events, media_type, session_response
+from events.v1.utils import event_videos, get_similar_events
 from users.permissions import IsStaffPermission
+
+
+def media_type(request) -> str:
+    """ Lower-cased request content type without parameters such as ``charset`` """
+    return request.content_type.split(';')[0].strip().lower()
+
+
+def session_response(session, http_status=status.HTTP_200_OK) -> Response:
+    """ Session representation with the confirmed offset also exposed as a header """
+    data = UploadSessionSerializer(session).data
+    response = Response(data, status=http_status)
+    response['Upload-Offset'] = str(data['offset'])
+    response['Cache-Control'] = 'no-store'
+    return response
 
 
 class EventsListView(ListAPIView):
     """ View for listing the events """
 
-    queryset = Event.objects.filter(videos__isnull=False)
+    queryset = Event.objects.filter(Exists(VideoAsset.objects.filter(event=OuterRef('pk')))).with_card_data()
     serializer_class = EventSerializer
     pagination_class = CustomPageNumberPagination
     filterset_class = EventFilter
@@ -54,27 +77,63 @@ class VideoAssetDetailView(RetrieveAPIView):
     serializer_class = VideoAssetSerializer
 
     def get_object(self):
-        obj = get_object_or_404(
-            VideoAsset.objects.select_related('event__creator').prefetch_related('event__tags', 'event__playlists'),
-            event__slug=self.kwargs["event_slug"]
-            )
-        return obj
+        """ The asset behind the event's stream (see ``event_videos``), so the payload describes one asset """
+        video_asset = event_videos(self.kwargs["event_slug"]).prefetch_related(
+            Prefetch('event', queryset=Event.objects.with_card_data())
+        ).first()
+        if video_asset is None:
+            raise Http404
+        return video_asset
 
 
+@extend_schema(
+    responses={
+        (200, 'video/*'): OpenApiTypes.BINARY,
+        (206, 'video/*'): OpenApiTypes.BINARY,
+        404: OpenApiResponse(description='The event has no playable video.'),
+        416: OpenApiResponse(description='The requested range is outside the file; Content-Range: bytes */<size>.'),
+    },
+    description='Streams the event video to an authenticated caller. Supports HTTP Range requests for seeking.',
+)
+class VideoAssetStreamView(APIView):
+    """ Stream the video file of an event; the only way video bytes leave the server """
+
+    content_negotiation_class = IgnoreClientContentNegotiation
+
+    def get(self, request, event_slug, *args, **kwargs):
+        """
+        Stream the event's playable video; authentication is enforced by the default ``IsAuthenticated`` permission.
+
+        The asset comes from ``event_videos``, the same resolver the video detail and the view count use, so the
+        three endpoints agree even when event slugs are not unique. An asset without a file is a 404.
+        """
+        video_asset = event_videos(event_slug).first()
+        if video_asset is None or not video_asset.video_file:
+            raise Http404
+        return stream_file_field(request, video_asset.video_file)
+
+
+@extend_schema(
+    request=None,
+    responses={
+        200: inline_serializer('VideoAssetViewCount', {'view_count': serializers.IntegerField()}),
+        404: OpenApiTypes.NONE,
+    },
+)
 class VideoAssetIncrementViewCountView(APIView):
     """ Increment view count for a VideoAsset by 1 """
 
     def post(self, request, event_slug, *args, **kwargs):
         """
-        Atomically increment the view count and return the value read back after the update.
+        Atomically increment the view count of the event's streamed asset and return the value read back.
 
-        A queryset update is used because VideoAsset.save() runs ffmpeg processing.
+        One filtered queryset update resolves the asset and increments it (VideoAsset.save() runs ffmpeg, so it is
+        not used); a second query reads the new value.
         """
-        video_asset_id = get_object_or_404(VideoAsset.objects.values_list('pk', flat=True), event__slug=event_slug)
-
-        queryset = VideoAsset.objects.filter(pk=video_asset_id)
-        queryset.update(view_count=F('view_count') + 1)
-        return Response({'view_count': queryset.values_list('view_count', flat=True).get()})
+        target = VideoAsset.objects.filter(pk__in=event_videos(event_slug).values('pk')[:1])
+        if not target.update(view_count=F('view_count') + 1):
+            raise Http404
+        return Response({'view_count': target.values_list('view_count', flat=True).get()})
 
 
 class TagListView(ListCreateAPIView):
@@ -105,6 +164,7 @@ class PlaylistListView(ListAPIView):
     filterset_class = PlaylistFilter
 
 
+@extend_schema(responses=EventSerializer(many=True))
 class EventRecommendationsView(APIView):
     """ View for listing similar events """
     pagination_class = CustomPageNumberPagination
@@ -125,19 +185,30 @@ class VideoAssetCreateView(CreateAPIView):
     View for uploading a new video asset (staff only).
 
     A multipart body uploads the whole file in one request. A JSON body starts a resumable upload session instead, whose
-    chunks are then sent to ``videoassets/<session id>/``.
+    chunks are then sent to ``videoassets/<session id>/``. GET lists the caller's unfinished resumable sessions.
     """
 
     permission_classes = [IsAuthenticated, IsStaffPermission]
     serializer_class = VideoAssetCreateSerializer
     parser_classes = [MultiPartParser, JSONParser]
-    throttle_scope = 'upload_create'
+    pagination_class = None
+    throttle_scopes = {'GET': 'upload_status', 'POST': 'upload_create'}
+
+    @property
+    def throttle_scope(self):
+        """ Scope read by ``ScopedRateThrottle`` for the current HTTP method """
+        return self.throttle_scopes.get(self.request.method)
 
     def get_throttles(self):
-        """ Only the JSON branch that opens a resumable session is throttled """
-        if media_type(self.request) == 'application/json':
+        """ Only listing and the JSON branch that opens a resumable session are throttled """
+        if self.request.method == 'GET' or media_type(self.request) == 'application/json':
             return [ScopedRateThrottle()]
         return super().get_throttles()
+
+    @extend_schema(responses={200: UploadSessionSerializer(many=True)})
+    def get(self, request, *args, **kwargs):
+        """ The caller's unfinished resumable uploads (``UPLOADING``, not expired), newest first """
+        return Response(UploadSessionSerializer(unfinished_sessions(request.user), many=True).data)
 
     @extend_schema(
         request={'multipart/form-data': VideoAssetCreateSerializer, 'application/json': UploadSessionCreateSerializer},

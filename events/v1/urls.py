@@ -11,6 +11,7 @@ from events.v1.views import (
     VideoAssetCreateView,
     VideoAssetDetailView,
     VideoAssetIncrementViewCountView,
+    VideoAssetStreamView,
 )
 
 urlpatterns = [
@@ -21,6 +22,7 @@ urlpatterns = [
         VideoAssetIncrementViewCountView.as_view(),
         name='video-asset-increment-view',
     ),
+    path('videoasset/<slug:event_slug>/stream/', VideoAssetStreamView.as_view(), name='video-asset-stream'),
     path('videoassets/', VideoAssetCreateView.as_view(), name='video-asset-create'),
     path('videoassets/<uuid:session_id>/', UploadSessionDetailView.as_view(), name='upload-session-detail'),
     path(
