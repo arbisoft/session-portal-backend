@@ -51,12 +51,13 @@ paths:
 - `Event` foreign keys use `on_delete=DO_NOTHING` and `EventAdmin` disables deletion — keep new relations consistent with that choice and say why if they differ.
 - Event slugs are assigned by the `post_save` signal in `events/signals.py`. Do not set them elsewhere.
 - File fields use the module-level storages in `events/models.py`; don't instantiate storages in views or serializers.
+- Stored names of video and thumbnail files come from the server, never the client filename: set `upload_to=unguessable_upload_name` (`events/models.py`, used by `VideoAsset.video_file` and `thumbnail`) on any new media field that serves private content. `captions_file` is the one field without it.
 
 ## Migrations
 
 - Any model, field, constraint, or relation change ships with its migration in the same PR.
 - Tests run with migrations disabled (`DisableMigrations`), so a green suite does not prove a migration works. Follow the `django-migration-standards` skill.
-- Data backfills use a data migration, not an ad-hoc script. Keep schema and data in separate files.
+- Data backfills use a data migration, not an ad-hoc script. Keep schema and data in separate files. Exception: a backfill that moves or converts files on disk (or runs for hours) is a resumable, idempotent management command with `--dry-run`, because a migration cannot roll files back with the transaction (precedents: `convert_videoassets`, `rename_media_files`). Pair it with the schema migration and document it in the README or `UPLOADS.md`.
 - Watch for: NOT NULL without default on populated tables, irreversible `RunPython`, rename-and-use in one PR, new Postgres extensions (the test DB creates `pg_trgm` in `conftest.py`, not through migrations).
 - Migrations must stay backwards-compatible with the code currently deployed (PR template requirement).
 
