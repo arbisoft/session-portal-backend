@@ -1,6 +1,7 @@
 import logging
 import os
 import uuid
+from operator import attrgetter
 
 import ffmpeg
 
@@ -10,24 +11,68 @@ from django.core.files.base import File
 from django.core.files.storage import FileSystemStorage
 from django.core.validators import FileExtensionValidator
 from django.db import models
+from django.db.models import Prefetch
 from django.utils.translation import gettext_lazy as _
 
 logger = logging.getLogger("asp_api")
 
 ALLOWED_VIDEO_EXTENSIONS = ("mp4", "mov", "avi", "webm")
+ALLOWED_CAPTION_EXTENSIONS = ("vtt", "srt")
+validate_caption_extension = FileExtensionValidator(list(ALLOWED_CAPTION_EXTENSIONS))
+
+
+def validate_new_caption_file(value) -> None:
+    """
+    Apply ``validate_caption_extension`` to a file being uploaded and leave one that is already stored alone.
+
+    Field validators run again on every admin save, so a rule added after files were stored would otherwise block
+    unrelated edits of rows that predate it.
+    """
+    if getattr(value, '_committed', False):
+        return
+    validate_caption_extension(value)
+
+
+validate_video_extension = FileExtensionValidator(
+    sorted(ALLOWED_VIDEO_EXTENSIONS),
+    message="Unsupported file type '.%(extension)s'. Allowed formats: %(allowed_extensions)s.",
+)
+
+
+def validate_video_filename(name: str) -> None:
+    """ Apply ``validate_video_extension`` to a bare filename instead of an uploaded file """
+    validate_video_extension(File(None, name=name))
+
 
 User = get_user_model()
+
+
+def unguessable_upload_name(_instance, filename: str) -> str:
+    """
+    ``upload_to`` for video and thumbnail files: a random UUID plus the original extension.
+
+    The client-supplied name is not used for files saved through the field, so a file URL cannot be guessed from a
+    title, a sequential name or a sibling file (a thumbnail no longer shares its video's name). Resumable uploads
+    bypass ``upload_to``: they are stored under their session UUID (``<session id>.mp4``).
+    """
+    return f"{uuid.uuid4().hex}{os.path.splitext(filename)[1].lower()}"
+
+
+VIDEOS_DIR = 'videos'
+THUMBNAILS_DIR = 'thumbnails'
+CAPTIONS_DIR = 'captions'
+PUBLIC_MEDIA_DIRS = (THUMBNAILS_DIR, CAPTIONS_DIR)
 video_storage = FileSystemStorage(
-    location=settings.MEDIA_ROOT / 'videos',
-    base_url=settings.MEDIA_URL + 'videos/'
+    location=settings.MEDIA_ROOT / VIDEOS_DIR,
+    base_url=f'{settings.MEDIA_URL}{VIDEOS_DIR}/'
 )
 thumbnail_storage = FileSystemStorage(
-    location=settings.MEDIA_ROOT / 'thumbnails',
-    base_url=settings.MEDIA_URL + 'thumbnails/'
+    location=settings.MEDIA_ROOT / THUMBNAILS_DIR,
+    base_url=f'{settings.MEDIA_URL}{THUMBNAILS_DIR}/'
 )
 captions_storage = FileSystemStorage(
-    location=settings.MEDIA_ROOT / 'captions',
-    base_url=settings.MEDIA_URL + 'captions/'
+    location=settings.MEDIA_ROOT / CAPTIONS_DIR,
+    base_url=f'{settings.MEDIA_URL}{CAPTIONS_DIR}/'
 )
 
 
@@ -51,6 +96,19 @@ class Playlist(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class EventQuerySet(models.QuerySet):
+    """ Queryset helpers for events """
+
+    def with_card_data(self):
+        """ Load everything ``EventSerializer`` reads so serializing a row costs no extra queries """
+        return self.select_related('creator').prefetch_related(
+            'videos',
+            'tags',
+            'playlists',
+            Prefetch('eventpresenter_set', queryset=EventPresenter.objects.select_related('user')),
+        )
 
 
 class Event(models.Model):
@@ -80,8 +138,19 @@ class Event(models.Model):
     created = models.DateTimeField(auto_now_add=True)
     modified = models.DateTimeField(auto_now=True)
 
+    objects = EventQuerySet.as_manager()
+
     def __str__(self):
         return self.title
+
+    def playable_video(self) -> 'VideoAsset | None':
+        """
+        Lowest-pk video of the event that has a file, read from prefetched ``videos`` when available.
+
+        Its SQL counterpart is ``events.v1.utils.event_videos``, which must be kept in step with it.
+        """
+        videos = (video for video in self.videos.all() if video.video_file)
+        return min(videos, key=attrgetter('pk'), default=None)
 
 
 class VideoAsset(models.Model):
@@ -96,14 +165,22 @@ class VideoAsset(models.Model):
     title = models.CharField(max_length=255)
     video_file = models.FileField(
         storage=video_storage,
+        upload_to=unguessable_upload_name,
         null=True,
         blank=True,
-        validators=[FileExtensionValidator(list(ALLOWED_VIDEO_EXTENSIONS))],
+        validators=[validate_video_extension],
     )
     duration = models.IntegerField(default=0)  # in seconds
-    thumbnail = models.ImageField(storage=thumbnail_storage, null=True, blank=True)
+    thumbnail = models.ImageField(
+        storage=thumbnail_storage, upload_to=unguessable_upload_name, null=True, blank=True
+    )
     status = models.CharField(max_length=20, choices=VideoStatus.choices)
-    captions_file = models.FileField(storage=captions_storage, null=True, blank=True)
+    captions_file = models.FileField(
+        storage=captions_storage,
+        null=True,
+        blank=True,
+        validators=[validate_new_caption_file],
+    )
     file_size = models.BigIntegerField(default=0)  # in bytes
     view_count = models.PositiveIntegerField(default=0)
     created = models.DateTimeField(auto_now_add=True)
@@ -122,8 +199,8 @@ class VideoAsset(models.Model):
                 self.duration = int(duration)  # Convert to seconds
 
                 if not self.thumbnail:
-                    thumbnail_filename = f"{os.path.splitext(os.path.basename(video_path))[0]}_thumb.jpg"
-                    thumbnail_path = os.path.join(os.path.dirname(video_path), thumbnail_filename)
+                    thumbnail_tmp_name = f"{os.path.splitext(os.path.basename(video_path))[0]}_thumb.jpg"
+                    thumbnail_path = os.path.join(os.path.dirname(video_path), thumbnail_tmp_name)
 
                     # Take a frame at 20% of the video duration for the thumbnail
                     time_offset = max(1, int(self.duration * 0.2))
@@ -139,7 +216,7 @@ class VideoAsset(models.Model):
 
                     # Save the thumbnail to the model
                     with open(thumbnail_path, 'rb') as thumb_file:
-                        self.thumbnail.save(thumbnail_filename, File(thumb_file), save=False)
+                        self.thumbnail.save(thumbnail_tmp_name, File(thumb_file), save=False)
 
                     # Clean up the temporary file
                     os.remove(thumbnail_path)
@@ -228,6 +305,7 @@ class UploadSession(models.Model):
     checksum_sha256 = models.CharField(max_length=64, blank=True, default='')
     status = models.CharField(max_length=20, choices=UploadStatus.choices, default=UploadStatus.UPLOADING)
     error_code = models.CharField(max_length=50, blank=True, default='')
+    # SET_NULL, not DO_NOTHING: VideoAsset is deletable in the admin and a DO_NOTHING FK would fail on the DB constraint
     video_asset = models.ForeignKey(
         VideoAsset, on_delete=models.SET_NULL, related_name='upload_sessions', null=True, blank=True
     )

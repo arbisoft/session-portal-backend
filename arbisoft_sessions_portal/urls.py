@@ -13,12 +13,19 @@ Class-based views
 Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+
+With ``DEBUG`` on, only the directories in ``events.models.PUBLIC_MEDIA_DIRS`` (thumbnails and captions) are
+served directly from ``MEDIA_URL``.
+Videos and in-flight uploads are deliberately left out: they are streamed by an authenticated view, see
+``events.v1.views.VideoAssetStreamView``.
 """
 from django.contrib import admin
 from django.urls import path, include
 from django.conf.urls.static import static
 from django.conf import settings
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+
+from events.models import PUBLIC_MEDIA_DIRS
 
 
 urlpatterns = [
@@ -32,4 +39,5 @@ urlpatterns = [
 ]
 
 if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    for public_dir in PUBLIC_MEDIA_DIRS:
+        urlpatterns += static(f'{settings.MEDIA_URL}{public_dir}/', document_root=settings.MEDIA_ROOT / public_dir)

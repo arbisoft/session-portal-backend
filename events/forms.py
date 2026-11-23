@@ -1,11 +1,15 @@
 from django import forms
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import UploadedFile
 from django.forms import TextInput
 
 from events.models import Event, EventPresenter, VideoAsset
 
 User = get_user_model()
+
+BYTES_PER_MIB = 1024 ** 2
 
 
 class VideoAssetForm(forms.ModelForm):
@@ -22,6 +26,14 @@ class VideoAssetForm(forms.ModelForm):
     class Meta:
         model = VideoAsset
         fields = ('title', 'video_file', 'thumbnail', 'captions_file',)
+
+    def clean_captions_file(self):
+        """ Reject a newly uploaded captions file above the configured size cap """
+        captions_file = self.cleaned_data.get('captions_file')
+        max_bytes = settings.CAPTIONS_MAX_FILE_BYTES
+        if isinstance(captions_file, UploadedFile) and captions_file.size > max_bytes:
+            raise ValidationError(f"Captions file is too large. The maximum size is {max_bytes / BYTES_PER_MIB:g} MiB.")
+        return captions_file
 
     def clean(self):
         """ Infer, save and clean the data related to videoasset """

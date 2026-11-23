@@ -33,7 +33,6 @@ class UploadSessionAdmin(admin.ModelAdmin):
     list_display = ('id', 'owner', 'filename', 'status', 'offset', 'file_size', 'expires_at', 'modified')
     list_filter = ('status',)
     list_select_related = ('owner',)
-    raw_id_fields = ('owner', 'video_asset')
     search_fields = ('id', 'filename', 'owner__email')
 
     def has_add_permission(self, request):
