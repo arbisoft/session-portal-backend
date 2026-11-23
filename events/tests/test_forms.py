@@ -1,9 +1,17 @@
+import re
+from datetime import timedelta
+
 import pytest
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
+from django.test import Client
+from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
+from django.utils import timezone
 
-from events.factories import EventFactory, UserFactory
+from events.factories import EventFactory, EventPresenterFactory, UserFactory, VideoAssetFactory
 from events.forms import EventPresenterForm, VideoAssetForm
 
 User = get_user_model()
@@ -145,3 +153,87 @@ class TestEventPresenterForm:
         actual_first_names = [user.first_name for user in users]
 
         assert actual_first_names == expected_first_names, f"Expected {expected_first_names}, got {actual_first_names}"
+
+
+@pytest.mark.django_db
+class TestEventAdminChangelist:
+    """Class to test the Event admin changelist"""
+    @pytest.fixture
+    def superuser_client(self):
+        """ A Django test client logged in as a superuser """
+        client = Client()
+        client.force_login(UserFactory(is_staff=True, is_superuser=True))
+        return client
+
+    @staticmethod
+    def row_html(content, event):
+        """ The changelist table row that links to the given event """
+        change_url = reverse('admin:events_event_change', args=[event.pk])
+        rows = re.split(r'<tr[\s>]', content)
+        return next(row for row in rows if f'href="{change_url}"' in row)
+
+    def test_changelist_renders_views_and_presenters(self, superuser_client):
+        """ The changelist shows each event's summed video views and its presenters' full names """
+        event = EventFactory()
+        VideoAssetFactory(event=event, view_count=3)
+        VideoAssetFactory(event=event, view_count=4)
+        EventPresenterFactory(event=event, user=UserFactory(first_name='Alice', last_name='Zebra'))
+        EventPresenterFactory(event=event, user=UserFactory(first_name='Bob', last_name='Yard'))
+        empty_event = EventFactory()
+
+        response = superuser_client.get(reverse('admin:events_event_changelist'))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        row = self.row_html(content, event)
+        assert '<td class="field-get_view_count">7</td>' in row
+        assert 'Alice Zebra' in row
+        assert 'Bob Yard' in row
+        assert '<td class="field-get_view_count">0</td>' in self.row_html(content, empty_event)
+
+    def test_views_column_sorts_by_total_views(self, superuser_client):
+        """ Sorting by the Views column orders events by their summed video views """
+        low = EventFactory()
+        VideoAssetFactory(event=low, view_count=2)
+        high = EventFactory()
+        VideoAssetFactory(event=high, view_count=5)
+        VideoAssetFactory(event=high, view_count=6)
+        none = EventFactory()
+        url = reverse('admin:events_event_changelist')
+        column = superuser_client.get(url).context['cl'].list_display.index('get_view_count')
+
+        ascending = superuser_client.get(url, {'o': column})
+        descending = superuser_client.get(url, {'o': -column})
+
+        assert [row.pk for row in ascending.context['cl'].result_list] == [none.pk, low.pk, high.pk]
+        assert [row.pk for row in descending.context['cl'].result_list] == [high.pk, low.pk, none.pk]
+
+    def test_presenters_do_not_add_queries_per_event(self, superuser_client):
+        """
+        Listing more events with presenters does not run more queries (presenters are prefetched).
+        The first request is a warm-up for session and permission caches so the counts are comparable.
+        """
+        url = reverse('admin:events_event_changelist')
+        for _ in range(2):
+            EventPresenterFactory(event=EventFactory())
+        superuser_client.get(url)
+
+        with CaptureQueriesContext(connection) as few_events:
+            superuser_client.get(url)
+        for _ in range(3):
+            EventPresenterFactory(event=EventFactory())
+        with CaptureQueriesContext(connection) as many_events:
+            superuser_client.get(url)
+
+        assert len(many_events) == len(few_events)
+
+    def test_default_sort_is_newest_first(self, superuser_client):
+        """ Events are listed by event time, newest first """
+        now = timezone.now()
+        old = EventFactory(event_time=now - timedelta(days=10))
+        new = EventFactory(event_time=now + timedelta(days=10))
+        mid = EventFactory(event_time=now)
+
+        response = superuser_client.get(reverse('admin:events_event_changelist'))
+
+        assert [row.pk for row in response.context['cl'].result_list] == [new.pk, mid.pk, old.pk]

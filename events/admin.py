@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.db import models
+from django.db.models.functions import Coalesce
 from django.forms import Textarea, TextInput
 
 from events.forms import EventAdminForm, EventPresenterForm, VideoAssetForm
@@ -56,7 +57,7 @@ class EventPresenterInline(admin.StackedInline):
 class EventAdmin(admin.ModelAdmin):
     """ Custom Admin for Event model """
     form = EventAdminForm
-    list_display = ('title', 'event_type', 'status', 'event_time', 'creator', 'get_presenters')
+    list_display = ('title', 'event_time', 'get_view_count', 'get_presenters', 'status')
     search_fields = ('title', 'description')
     filter_horizontal = ('tags', 'playlists')
     formfield_overrides = {
@@ -65,7 +66,7 @@ class EventAdmin(admin.ModelAdmin):
     }
     inlines = [EventPresenterInline]
     autocomplete_fields = ('creator', )
-    ordering = ('event_time', 'title', 'status')
+    ordering = ('-event_time', 'title')
     list_editable = ('status', )
 
     fieldsets = (
@@ -79,6 +80,19 @@ class EventAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         """ Do not allow deletion of Event directly """
         return False
+
+    def get_queryset(self, request):
+        """ Annotate the total views of an event's videos and prefetch presenters for the list """
+        return super().get_queryset(request).annotate(
+            total_view_count=Coalesce(models.Sum('videos__view_count'), 0)
+        ).prefetch_related('presenters')
+
+    def get_view_count(self, obj):
+        """ Total views across the event's videos """
+        return obj.total_view_count
+
+    get_view_count.short_description = "Views"
+    get_view_count.admin_order_field = "total_view_count"
 
     def get_presenters(self, obj):
         """ Fetch Presenter First Name and Last Name """
