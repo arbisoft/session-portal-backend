@@ -200,6 +200,11 @@ RESUMABLE_UPLOAD_FINALIZE_TIMEOUT_HOURS = int(os.getenv("RESUMABLE_UPLOAD_FINALI
 VIDEO_TRANSCODE_TIMEOUT_SECONDS = int(os.getenv("VIDEO_TRANSCODE_TIMEOUT_SECONDS", str(5 * 3600)))
 RESUMABLE_UPLOAD_RETENTION_DAYS = int(os.getenv("RESUMABLE_UPLOAD_RETENTION_DAYS", "7"))
 
+# Largest body a single ranged video response carries. Browsers open `bytes=0-` and keep the connection open while
+# their buffer is full, which would hold a web worker for the whole file; a capped 206 frees it after this many bytes
+# and the player asks for the next range. A request without a Range header still gets the whole file.
+VIDEO_STREAM_MAX_RANGE_BYTES = int(os.getenv("VIDEO_STREAM_MAX_RANGE_BYTES", str(8 * _MIB)))
+
 # Caption files are served from MEDIA_URL in debug and read by the player, so they stay small.
 CAPTIONS_MAX_FILE_BYTES = int(os.getenv("CAPTIONS_MAX_FILE_BYTES", str(2 * _MIB)))
 

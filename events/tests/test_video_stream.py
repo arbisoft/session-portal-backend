@@ -334,6 +334,75 @@ class TestVideoAssetStreamEdgeCases:
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
+RANGE_CAP = 100
+
+
+@pytest.fixture
+def range_cap(settings):
+    """ Cap ranged responses at ``RANGE_CAP`` bytes so the 2048-byte test file needs several of them """
+    settings.VIDEO_STREAM_MAX_RANGE_BYTES = RANGE_CAP
+
+
+@pytest.mark.django_db
+@pytest.mark.usefixtures('range_cap')
+class TestRangeCap:
+    """ A ranged response is capped so an open-ended ``bytes=0-`` cannot hold a worker for the whole file """
+
+    url = staticmethod(lambda: reverse('video-asset-stream', args=['my-talk']))
+
+    @pytest.mark.parametrize('header, start, end', [
+        ('bytes=0-', 0, 99),
+        ('bytes=500-', 500, 599),
+        ('bytes=500-1999', 500, 599),
+        ('bytes=0-99999', 0, 99),
+        ('bytes=-500', 1548, 1647),
+    ], ids=['open-from-start', 'open-from-middle', 'explicit-wide', 'past-end', 'wide-suffix'])
+    def test_long_range_is_capped(self, user_client, stream_asset, header, start, end):
+        response = user_client.get(self.url(), HTTP_RANGE=header)
+        assert response.status_code == status.HTTP_206_PARTIAL_CONTENT
+        assert response['Content-Range'] == f'bytes {start}-{end}/2048'
+        assert response['Content-Length'] == str(RANGE_CAP)
+        assert body(response) == CONTENT[start:end + 1]
+
+    @pytest.mark.parametrize('header, start, end', [
+        ('bytes=10-49', 10, 49),
+        ('bytes=0-99', 0, 99),
+        ('bytes=2000-', 2000, 2047),
+        ('bytes=-30', 2018, 2047),
+    ], ids=['short', 'exactly-the-cap', 'tail-shorter-than-cap', 'short-suffix'])
+    def test_range_within_cap_is_unchanged(self, user_client, stream_asset, header, start, end):
+        response = user_client.get(self.url(), HTTP_RANGE=header)
+        assert response['Content-Range'] == f'bytes {start}-{end}/2048'
+        assert body(response) == CONTENT[start:end + 1]
+
+    def test_request_without_range_gets_whole_file(self, user_client, stream_asset):
+        response = user_client.get(self.url())
+        assert response.status_code == status.HTTP_200_OK
+        assert response['Content-Length'] == str(len(CONTENT))
+        assert body(response) == CONTENT
+
+    def test_stale_if_range_gets_whole_file(self, user_client, stream_asset):
+        response = user_client.get(self.url(), HTTP_RANGE='bytes=0-', HTTP_IF_RANGE='"stale"')
+        assert response.status_code == status.HTTP_200_OK
+        assert body(response) == CONTENT
+
+    def test_head_reports_capped_length(self, user_client, stream_asset):
+        response = user_client.head(self.url(), HTTP_RANGE='bytes=0-')
+        assert response.status_code == status.HTTP_206_PARTIAL_CONTENT
+        assert response['Content-Range'] == 'bytes 0-99/2048'
+        assert response['Content-Length'] == '100'
+
+    def test_following_ranges_rebuilds_the_file(self, user_client, stream_asset):
+        received, offset, requests = b'', 0, 0
+        while offset < len(CONTENT):
+            response = user_client.get(self.url(), HTTP_RANGE=f'bytes={offset}-')
+            served_end = int(response['Content-Range'].split(' ')[1].split('/')[0].split('-')[1])
+            received += body(response)
+            offset, requests = served_end + 1, requests + 1
+        assert received == CONTENT
+        assert requests == 21
+
+
 @pytest.mark.django_db
 class TestPlayableAssetSelection:
     """ The stream and the serializers must agree on which asset of a multi-asset event is playable """
