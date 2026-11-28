@@ -36,7 +36,7 @@ Errors are `{"code": ..., "detail": ...}` plus context. Codes the client acts on
 | 413 | `chunk_too_large` | Larger than `max_chunk_size`. |
 | 400 | `incomplete_chunk`, `chunk_out_of_range` | Body shorter than `Content-Length`, or beyond the declared file size. |
 | 415 | `unsupported_media_type` | Wrong `Content-Type`. |
-| 422 | `checksum_mismatch`, `invalid_file_signature` | Corrupted chunk, or the first bytes are not a video of the claimed type. |
+| 422 | `checksum_mismatch`, `invalid_file_signature` | Corrupted chunk (re-send it), or the first bytes are not a video of the claimed type. `invalid_file_signature` also fails the session and deletes its partial file, so it no longer counts toward the active-upload cap; start a new upload. |
 | 507 | `insufficient_storage` | Not enough disk space, at creation or while writing a chunk. |
 | 503 | `queue_unavailable` | The broker is down, so finalization was not queued. Retry `finalize` shortly. |
 | 429 | (throttle) | Honour `Retry-After`. |

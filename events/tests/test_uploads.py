@@ -384,6 +384,31 @@ class TestUploadChunks:
         session.refresh_from_db()
         assert session.offset == 0
 
+    def test_wrong_signature_fails_the_session(
+        self, staff_client, session_for, django_capture_on_commit_callbacks
+    ):
+        """ The refused session is failed and its partial file removed, so it no longer holds an upload slot """
+        text = b'This is plain text pretending to be a video file.' * 3
+        session = session_for(text)
+
+        with django_capture_on_commit_callbacks(execute=True):
+            send_chunk(staff_client, session.id, 0, text)
+
+        session.refresh_from_db()
+        assert session.status == UploadSession.UploadStatus.FAILED
+        assert session.error_code == 'invalid_file_signature'
+        assert session.video_asset is None
+        assert not part_path(session.id).exists()
+
+    def test_signature_failure_frees_the_slot(self, staff_client, session_for, settings):
+        """ A refused upload does not count toward the active-upload limit """
+        settings.RESUMABLE_UPLOAD_MAX_ACTIVE_PER_USER = 1
+        text = b'This is plain text pretending to be a video file.' * 3
+        refused = session_for(text)
+        send_chunk(staff_client, refused.id, 0, text)
+
+        session_for(make_video(100), client_key='next-upload')
+
     def test_chunk_request_is_throttled(self, staff_client, session_for):
         """ Chunk writes are rate limited as well """
         data = make_video(300)

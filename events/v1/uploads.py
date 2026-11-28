@@ -377,8 +377,12 @@ def append_chunk(session_id: UUID, owner, chunk: ChunkRequest) -> UploadSession:
     The partial file is reconciled with the committed offset first: bytes beyond it (a write that crashed before its
     commit) are truncated, and a file shorter than the offset (lost data) lowers the offset and reports a mismatch so
     the client resumes from the truth.
+
+    A first chunk whose content does not match the file extension fails the session, so it stops holding an upload
+    slot. The failure is committed before the 422 is raised.
     """
     lowered_to = None
+    rejected = None
     with transaction.atomic():
         session = _lock_session(session_id, owner)
         _assert_accepting_bytes(session)
@@ -392,9 +396,17 @@ def append_chunk(session_id: UUID, owner, chunk: ChunkRequest) -> UploadSession:
             _truncate(path, session.offset)
         if lowered_to is None:
             _validate_chunk_bounds(session, chunk)
-            _commit_chunk(session, chunk)
+            try:
+                _commit_chunk(session, chunk)
+            except UploadAPIError as exc:
+                if exc.detail["code"] != INVALID_SIGNATURE_ERROR:
+                    raise
+                _fail_session(session, INVALID_SIGNATURE_ERROR)
+                rejected = exc
     if lowered_to is not None:
         raise _offset_mismatch(lowered_to)
+    if rejected is not None:
+        raise rejected
     return session
 
 
