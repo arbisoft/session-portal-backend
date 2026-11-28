@@ -13,6 +13,7 @@ from typing import BinaryIO, Iterator
 
 from rest_framework.negotiation import BaseContentNegotiation
 
+from django.conf import settings
 from django.http import Http404, HttpResponse, StreamingHttpResponse
 from django.utils.http import http_date, parse_http_date_safe
 
@@ -82,6 +83,16 @@ def _parse_range(header: str, size: int) -> tuple[int, int] | None:
     return start, end
 
 
+def _cap_range(start: int, end: int) -> tuple[int, int]:
+    """
+    Shorten an inclusive range to at most ``VIDEO_STREAM_MAX_RANGE_BYTES`` bytes from ``start``.
+
+    The 206 then carries a ``Content-Range`` naming the shorter span, which media players follow by requesting the
+    next range, so no single response keeps a web worker busy for the length of the whole file.
+    """
+    return start, min(end, start + settings.VIDEO_STREAM_MAX_RANGE_BYTES - 1)
+
+
 class FileRangeIterator:
     """ Iterate over ``length`` bytes of an already opened file from ``start``; ``close()`` releases the handle """
 
@@ -133,6 +144,8 @@ def _build_response(request, file_obj: BinaryIO, name: str) -> HttpResponse:
 
     if byte_range and not _if_range_matches(request, etag, mtime):
         byte_range = None
+    if byte_range:
+        byte_range = _cap_range(*byte_range)
 
     start, end = byte_range or (0, size - 1)
     length = end - start + 1
@@ -156,7 +169,8 @@ def _build_response(request, file_obj: BinaryIO, name: str) -> HttpResponse:
 
 def stream_file_field(request, file_field) -> HttpResponse:
     """
-    Build a 200/206/416 response for ``file_field`` honouring the request's ``Range`` header.
+    Build a 200/206/416 response for ``file_field`` honouring the request's ``Range`` header; a 206 never carries more
+    than ``VIDEO_STREAM_MAX_RANGE_BYTES`` (see ``_cap_range``).
 
     The file is opened once, before the status line is committed, and size, mtime and ETag are read from that handle,
     so a file replaced mid-request cannot make the headers describe a different file than the body. The handle is
