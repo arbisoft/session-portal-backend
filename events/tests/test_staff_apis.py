@@ -434,14 +434,36 @@ class TestEventCreateAPI:
         assert video_asset.event is None
 
     def test_unknown_video_asset_is_rejected(self, staff_client):
-        """ An event must not be published without a video """
+        """ An event must not be published without a video, and nothing is written when it is missing """
+        unrelated_asset = VideoAssetFactory(event=None)
+        presenter = UserFactory()
+
         response = staff_client.post(
-            reverse('event-create'), self.payload(999999), format='json'
+            reverse('event-create'), self.payload(999999, presenter_ids=[presenter.id]), format='json'
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert 'video_asset_id' in response.data
         assert not Event.objects.filter(title='Intro to Django').exists()
+        assert not EventPresenter.objects.exists()
+        unrelated_asset.refresh_from_db()
+        assert unrelated_asset.event is None
+
+    def test_duplicate_presenter_ids_create_one_presenter(self, staff_client):
+        """ A presenter listed more than once is linked to the event once """
+        video_asset = VideoAssetFactory(event=None)
+        presenter = UserFactory()
+
+        response = staff_client.post(
+            reverse('event-create'),
+            self.payload(video_asset.id, presenter_ids=[presenter.id, presenter.id]),
+            format='json',
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        event = Event.objects.get(pk=response.data['id'])
+        assert EventPresenter.objects.filter(event=event, user=presenter).count() == 1
+        assert len(response.data['presenters']) == 1
 
     def test_assigned_video_asset_is_not_reassigned(self, staff_client):
         """ A video that already belongs to an event must keep it """
