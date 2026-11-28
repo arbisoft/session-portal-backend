@@ -153,6 +153,7 @@ class TestCurrentUserAPI:
             "full_name": "Test User",
             "email": user.email,
             "is_staff": False,
+            "role": "user",
         }
 
     def test_full_name_falls_back_to_email(self, api_client):
@@ -165,21 +166,22 @@ class TestCurrentUserAPI:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["full_name"] == user.email
 
-    @pytest.mark.parametrize("is_staff, is_superuser", [
-        (False, False),
-        (True, False),
-        (False, True),
+    @pytest.mark.parametrize("is_staff, is_superuser, role", [
+        (False, False, "user"),
+        (True, False, "staff"),
+        (False, True, "admin"),
+        (True, True, "admin"),
     ])
-    def test_is_staff_mirrors_flag_no_role(self, api_client, is_staff, is_superuser):
-        """ Test that is_staff equals the stored flag and no role is returned """
+    def test_role_follows_staff_and_superuser(self, api_client, is_staff, is_superuser, role):
+        """ Test that role is derived from the auth flags and is_staff equals the stored flag """
         user = UserFactory(is_staff=is_staff, is_superuser=is_superuser)
         self._authenticate(api_client, user)
 
         response = api_client.get(reverse("current_user"))
 
         assert response.status_code == status.HTTP_200_OK
+        assert response.data["role"] == role
         assert response.data["is_staff"] is is_staff
-        assert "role" not in response.data
 
     def test_does_not_expose_sensitive_fields(self, api_client, user):
         """ Test that the password is never part of the response """
